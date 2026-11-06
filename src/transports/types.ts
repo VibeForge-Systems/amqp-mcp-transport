@@ -34,7 +34,10 @@ export type RoutingMessageType = 'request' | 'client-notification' | 'server-not
  * (e.g. `mcp.request.nmap.nmap_scan`) can supply their own function.  A
  * custom strategy MUST keep requests and client notifications inside the
  * patterns the server binds (`mcp.request.#`, `mcp.client-notification.#`),
- * and server notifications inside `mcp.server-notification.#`.
+ * and server notifications inside `mcp.server-notification.#`.  Nothing
+ * enforces this: the broker drops a message whose key no queue binds.  Each
+ * transport logs a warning the first time a strategy returns a key outside a
+ * namespace.
  */
 export type RoutingKeyStrategy = (message: JSONRPCMessage, routingType: RoutingMessageType) => string;
 
@@ -153,9 +156,9 @@ export interface ConnectableServer {
 /**
  * Supplies a server per transport attach.
  *
- * The MCP SDK refuses to bind one server to a second transport, so the
- * runtime asks for a fresh instance on every (re)attach.  `release` lets the
- * owner stop tracking an instance once its transport has gone.
+ * The runtime asks for a fresh instance on every (re)attach, so no server
+ * carries state from an earlier connection.  `release` lets the owner stop
+ * tracking an instance once its transport has gone.
  */
 export interface AmqpServerFactory<TServer extends ConnectableServer = ConnectableServer> {
     create(): Promise<TServer>;

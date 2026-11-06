@@ -8,6 +8,9 @@
  * Wire behaviour (normative text: docs/TRANSPORT_CONTRACT.md):
  *  - Requests publish under `mcp.request.<method>` with `replyTo` set to this
  *    client's exclusive reply queue and a fresh `correlationId`.
+ *  - Requests publish `mandatory: true`.  When no server queue is bound for a
+ *    request's key, the broker returns it, and the request fails at once with
+ *    a no-route JSON-RPC error instead of waiting for the SDK's timeout.
  *  - Client notifications publish under `mcp.client-notification.<method>`.
  *  - Server notifications are received from `mcp.server-notification.#`.
  *  - Clients never send JSON-RPC responses: servers do not initiate requests
@@ -22,6 +25,7 @@ import type {
     ConnectionState,
     JSONRPCMessage,
     MessageExtraInfo,
+    RequestId,
     Transport,
     TransportLogger,
     TransportSendOptions,
@@ -33,18 +37,32 @@ import {
     detectMessageType,
     generateCorrelationId,
     generateSessionId,
-    getRoutingKey,
     isJSONRPCRequest,
     routingExchangeName,
     validateJSONRPC,
 } from "./amqp-utils.js";
+import { createRoutingKeyResolver, type RoutingKeyResolver } from "./routing-key.js";
+
+/**
+ * JSON-RPC error code for a request the broker returned unrouted.  It is the
+ * MCP SDK's `ErrorCode.ConnectionClosed`, which callers already treat as "the
+ * server could not be reached".  The error's `data.reason` is `'no-route'`.
+ */
+const NO_ROUTE_ERROR_CODE = -32000;
 
 // Request tracking
 interface PendingRequest {
+    id: RequestId;
     startTime: number;
     method: string | undefined;
     timeout: ReturnType<typeof setTimeout>;
     correlationId: string;
+}
+
+/** The parts of an amqplib `return` event the client reads. */
+interface ReturnedMessage {
+    properties?: { correlationId?: unknown };
+    fields?: { replyCode?: unknown; replyText?: unknown; exchange?: unknown; routingKey?: unknown };
 }
 
 /**
@@ -57,6 +75,7 @@ export class AMQPClientTransport implements Transport {
 
     private readonly connectionState: ConnectionState = { connected: false, reconnectAttempts: 0 };
     private readonly logger: TransportLogger;
+    private readonly routingKeyFor: RoutingKeyResolver;
     private closing = false;
     private closeNotified = false;
     // True while connect() is intentionally tearing down the previous connection, so the old
@@ -98,6 +117,7 @@ export class AMQPClientTransport implements Transport {
             ...options
         };
         this.logger = options.logger ?? createDefaultLogger('AMQP_CLIENT_TRANSPORT');
+        this.routingKeyFor = createRoutingKeyResolver(this.options.routingKeyStrategy, this.logger);
         this.sessionId = generateSessionId();
     }
 
@@ -247,6 +267,8 @@ export class AMQPClientTransport implements Transport {
         this.channel.on('error', (error: unknown) =>
             this.handleConnectionError(error instanceof Error ? error : new Error(String(error))),
         );
+        // Requests publish mandatory; the broker hands back any it cannot route.
+        this.channel.on('return', (message: ReturnedMessage) => this.handleReturnedRequest(message));
         if (this.options.prefetchCount) {
             await this.channel.prefetch(this.options.prefetchCount);
         }
@@ -296,9 +318,9 @@ export class AMQPClientTransport implements Transport {
         if (!this.channel) throw new Error('AMQP channel not established');
 
         const correlationId = generateCorrelationId(this.sessionId);
-        const routingKey = getRoutingKey(message, 'request', this.options.routingKeyStrategy);
+        const routingKey = this.routingKeyFor(message, 'request');
 
-        this.setupRequestTimeout(correlationId, message.method);
+        this.setupRequestTimeout(correlationId, message.id, message.method);
 
         this.channel.publish(exchangeName, routingKey, messageBuffer, {
             correlationId,
@@ -306,13 +328,14 @@ export class AMQPClientTransport implements Transport {
             contentType: 'application/json',
             timestamp: Date.now(),
             persistent: false,
+            mandatory: true,
         });
     }
 
     private sendNotification(message: JSONRPCMessage, messageBuffer: Buffer, exchangeName: string): void {
         if (!this.channel) throw new Error('AMQP channel not established');
 
-        const routingKey = getRoutingKey(message, 'client-notification', this.options.routingKeyStrategy);
+        const routingKey = this.routingKeyFor(message, 'client-notification');
 
         this.channel.publish(exchangeName, routingKey, messageBuffer, {
             contentType: 'application/json',
@@ -386,7 +409,45 @@ export class AMQPClientTransport implements Transport {
 
     // ── Private: timeout & correlation ───────────────────────────────────────
 
-    private setupRequestTimeout(correlationId: string, method?: string): void {
+    /**
+     * The broker returned a mandatory publish it could not route.
+     *
+     * Only requests publish mandatory, so a returned message is a request no
+     * server queue received.  Nothing will ever answer it, so the request
+     * fails now: the SDK receives a JSON-RPC error for the request's own id,
+     * just as if a server had answered with one.
+     */
+    private handleReturnedRequest(message: ReturnedMessage): void {
+        const correlationId =
+            typeof message.properties?.correlationId === 'string' ? message.properties.correlationId : undefined;
+        const pending = correlationId === undefined ? undefined : this.pendingRequests.get(correlationId);
+        if (!correlationId || !pending) {
+            return;
+        }
+        clearTimeout(pending.timeout);
+        this.pendingRequests.delete(correlationId);
+
+        const fields = message.fields ?? {};
+        const exchange = typeof fields.exchange === 'string' ? fields.exchange : undefined;
+        const routingKey = typeof fields.routingKey === 'string' ? fields.routingKey : undefined;
+        const replyCode = typeof fields.replyCode === 'number' ? fields.replyCode : undefined;
+        const replyText = typeof fields.replyText === 'string' ? fields.replyText : undefined;
+        const reply = [replyCode, replyText].filter((part) => part !== undefined).join(' ');
+
+        this.onmessage?.({
+            jsonrpc: '2.0',
+            id: pending.id,
+            error: {
+                code: NO_ROUTE_ERROR_CODE,
+                message:
+                    `No MCP server is bound to exchange '${exchange ?? 'unknown'}' for routing key ` +
+                    `'${routingKey ?? 'unknown'}'. The broker returned the request${reply ? ` (${reply})` : ''}.`,
+                data: { reason: 'no-route', exchange, routingKey, replyCode, replyText },
+            },
+        } as JSONRPCMessage);
+    }
+
+    private setupRequestTimeout(correlationId: string, id: RequestId, method?: string): void {
         const timeoutMs = this.options.responseTimeout!;
         const timeout = setTimeout(() => {
             if (this.pendingRequests.has(correlationId)) {
@@ -397,6 +458,7 @@ export class AMQPClientTransport implements Transport {
         timeout.unref?.();
 
         this.pendingRequests.set(correlationId, {
+            id,
             startTime: Date.now(),
             method,
             timeout,

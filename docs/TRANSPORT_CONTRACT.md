@@ -29,6 +29,10 @@ routing namespaces:
 `<method>` is the JSON-RPC method with `/` replaced by `.`. A custom `routingKeyStrategy` may
 change the suffix, but it MUST keep each message inside its namespace's binding pattern.
 
+Nothing enforces this. A key outside the pattern matches no queue, so the broker drops the
+message, or returns it if it is a request (§6). Each transport logs a warning the first time its
+strategy returns such a key for a namespace, and still publishes the message.
+
 Responses never touch the exchange. They go straight to the requesting client's reply queue.
 
 ## 1. Endpoint, not session
@@ -91,8 +95,17 @@ therefore unavailable.
 ## 6. Delivery bounds
 
 - **Dropped messages.** A message over `maxMessageSize` (default 1 MiB), one that is not JSON,
-  and one that fails JSON-RPC validation is dropped: nack, no requeue, no dead-letter exchange.
-  The server reports it through `onerror`.
+  and one that fails JSON-RPC validation is dropped, with no dead-letter exchange. The server
+  nacks it without requeue. The client acks it and discards it. Both report it through `onerror`.
+- **Unroutable requests.** The client publishes every request `mandatory: true`. When no queue
+  is bound for a request's routing key, because no server is running or a custom strategy left
+  the namespace, the broker returns it (`basic.return`, 312 `NO_ROUTE`). The client then fails
+  that request at once with a JSON-RPC error for the request's own id:
+  - `code` is `-32000`, the MCP SDK's `ErrorCode.ConnectionClosed`;
+  - `data` is `{ reason: "no-route", exchange, routingKey, replyCode, replyText }`.
+
+  The request's transport timer stops with it. Client notifications are not published
+  `mandatory`; one that no server receives is dropped.
 - **TTLs.** The endpoint queue declares `x-message-ttl` (default 1 h) and `x-expires`
   (default 2 h).
 - **Recovery.**

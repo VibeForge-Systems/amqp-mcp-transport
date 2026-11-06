@@ -37,12 +37,12 @@ import {
     createDefaultLogger,
     detectMessageType,
     generateSessionId,
-    getRoutingKey,
     routingExchangeName,
     sanitizeJsonRpcMessage,
     validateAmqpConfig,
     validateJSONRPC,
 } from "./amqp-utils.js";
+import { createRoutingKeyResolver, type RoutingKeyResolver } from "./routing-key.js";
 
 // Minimal connection interface to align with amqplib Promise API
 export interface AMQPConnection {
@@ -80,6 +80,7 @@ export class AMQPServerTransport implements Transport {
     private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private readonly maxMessageSize: number;
     private readonly logger: TransportLogger;
+    private readonly routingKeyFor: RoutingKeyResolver;
     private closing = false;
     private closeNotified = false;
     // True while connect() is intentionally tearing down the previous connection so the OLD
@@ -122,6 +123,7 @@ export class AMQPServerTransport implements Transport {
         }
         this.maxMessageSize = options.maxMessageSize ?? DEFAULT_MAX_MESSAGE_SIZE;
         this.logger = options.logger ?? createDefaultLogger('AMQP_SERVER_TRANSPORT');
+        this.routingKeyFor = createRoutingKeyResolver(options.routingKeyStrategy, this.logger);
         this.sessionId = generateSessionId();
     }
 
@@ -198,7 +200,7 @@ export class AMQPServerTransport implements Transport {
         }
 
         const exchangeName = routingExchangeName(this.options.exchangeName);
-        const routingKey = getRoutingKey(cleanMessage, 'server-notification', this.options.routingKeyStrategy);
+        const routingKey = this.routingKeyFor(cleanMessage, 'server-notification');
         const content = Buffer.from(JSON.stringify(cleanMessage));
 
         this.channel.publish(exchangeName, routingKey, content, {
