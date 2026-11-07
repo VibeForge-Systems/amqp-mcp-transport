@@ -456,6 +456,157 @@ describe('client wire contract', () => {
         expect(errors[0]?.message).toMatch(/cancelled the consumer/i);
         await client.close();
     });
+
+    it('§6 publishes requests mandatory, and notifications without it', async () => {
+        const { client, channel } = await startClient();
+        await client.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' } as JSONRPCMessage);
+        await client.send({ jsonrpc: '2.0', method: 'notifications/initialized' } as JSONRPCMessage);
+        expect(channel.published[0]!.options).toMatchObject({ mandatory: true });
+        expect(channel.published[1]!.options).not.toHaveProperty('mandatory');
+        await client.close();
+    });
+
+    it('§6 a request the broker returns unrouted fails at once with a no-route error', async () => {
+        const channel = createMockChannel();
+        const client = new AMQPClientTransport({ ...clientOptions, responseTimeout: 20 });
+        client._connectFn = async () => createMockConnection(channel) as any;
+        await client.start();
+        const messages: JSONRPCMessage[] = [];
+        const errors: Error[] = [];
+        client.onmessage = (message) => { messages.push(message); };
+        client.onerror = (error) => { errors.push(error); };
+
+        await client.send({ jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'scan' } } as JSONRPCMessage);
+        const request = channel.published[0]!;
+        // What amqplib emits for basic.return: the message as published, plus the reply fields.
+        channel.emit('return', {
+            content: request.content,
+            properties: request.options,
+            fields: { replyCode: 312, replyText: 'NO_ROUTE', exchange: request.exchange, routingKey: request.routingKey },
+        });
+
+        expect(messages).toEqual([{
+            jsonrpc: '2.0',
+            id: 7,
+            error: {
+                code: -32000,
+                message: expect.stringContaining("No MCP server is bound to exchange 'test.exchange.mcp.routing'"),
+                data: {
+                    reason: 'no-route',
+                    exchange: 'test.exchange.mcp.routing',
+                    routingKey: 'mcp.request.tools.call',
+                    replyCode: 312,
+                    replyText: 'NO_ROUTE',
+                },
+            },
+        }]);
+        // The request is settled, so its transport timer must not report a timeout as well.
+        await wait(40);
+        expect(errors).toEqual([]);
+        await client.close();
+    });
+
+    it('§6 ignores a return that matches no pending request', async () => {
+        const { client, channel } = await startClient();
+        const messages: JSONRPCMessage[] = [];
+        client.onmessage = (message) => { messages.push(message); };
+        await client.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' } as JSONRPCMessage);
+        channel.emit('return', { properties: { correlationId: 'not-a-pending-request' }, fields: { replyCode: 312 } });
+        channel.emit('return', { fields: { replyCode: 312 } });
+        expect(messages).toEqual([]);
+        await client.close();
+    });
+});
+
+// ─── Topology: routingKeyStrategy must stay in its namespace ────────────────
+
+describe('Topology: a routingKeyStrategy outside its namespace', () => {
+    function recordingLogger() {
+        const warnings: string[] = [];
+        const logger = {
+            debug: () => undefined,
+            info: () => undefined,
+            error: () => undefined,
+            warn: (message: string) => { warnings.push(message); },
+        };
+        return { warnings, logger };
+    }
+
+    const method = (message: JSONRPCMessage) => ('method' in message ? message.method : '');
+
+    it('the client still publishes, and warns once per namespace', async () => {
+        const { warnings, logger } = recordingLogger();
+        const channel = createMockChannel();
+        const client = new AMQPClientTransport({
+            amqpUrl: 'amqp://localhost',
+            serverQueuePrefix: 'test.queue',
+            exchangeName: 'test.exchange',
+            logger,
+            routingKeyStrategy: (message, routingType) => `custom.${routingType}.${method(message)}`,
+        });
+        client._connectFn = async () => createMockConnection(channel) as any;
+        await client.start();
+
+        await client.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' } as JSONRPCMessage);
+        await client.send({ jsonrpc: '2.0', id: 2, method: 'tools/list' } as JSONRPCMessage);
+        await client.send({ jsonrpc: '2.0', method: 'notifications/initialized' } as JSONRPCMessage);
+
+        expect(channel.published.map((p) => p.routingKey)).toEqual([
+            'custom.request.tools/list',
+            'custom.request.tools/list',
+            'custom.client-notification.notifications/initialized',
+        ]);
+        expect(warnings).toHaveLength(2);
+        expect(warnings[0]).toContain("'custom.request.tools/list'");
+        expect(warnings[0]).toContain('mcp.request.#');
+        expect(warnings[1]).toContain('mcp.client-notification.#');
+        await client.close();
+    });
+
+    it('the server warns for a server notification outside mcp.server-notification.#', async () => {
+        const { warnings, logger } = recordingLogger();
+        const channel = createMockChannel();
+        const transport = new AMQPServerTransport({
+            ...serverOptions,
+            logger,
+            routingKeyStrategy: (message, routingType) => `custom.${routingType}.${method(message)}`,
+        });
+        transport._connectFn = async () => createMockConnection(channel) as any;
+        await transport.start();
+
+        await transport.send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' } as JSONRPCMessage);
+        await transport.send({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' } as JSONRPCMessage);
+
+        expect(channel.published).toHaveLength(2);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain('mcp.server-notification.#');
+        await transport.close();
+    });
+
+    it('a key inside its namespace logs nothing, however deep the suffix', async () => {
+        const { warnings, logger } = recordingLogger();
+        const channel = createMockChannel();
+        const client = new AMQPClientTransport({
+            amqpUrl: 'amqp://localhost',
+            serverQueuePrefix: 'test.queue',
+            exchangeName: 'test.exchange',
+            logger,
+            // Category routing, e.g. mcp.request.nmap.tools.call.
+            routingKeyStrategy: (message, routingType) => `mcp.${routingType}.nmap.${method(message).replace(/\//g, '.')}`,
+        });
+        client._connectFn = async () => createMockConnection(channel) as any;
+        await client.start();
+
+        await client.send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'scan' } } as JSONRPCMessage);
+        await client.send({ jsonrpc: '2.0', method: 'notifications/initialized' } as JSONRPCMessage);
+
+        expect(channel.published.map((p) => p.routingKey)).toEqual([
+            'mcp.request.nmap.tools.call',
+            'mcp.client-notification.nmap.notifications.initialized',
+        ]);
+        expect(warnings).toEqual([]);
+        await client.close();
+    });
 });
 
 // ─── Runtime recovery (OD test_amqp_transport.js adapter cases) ─────────────

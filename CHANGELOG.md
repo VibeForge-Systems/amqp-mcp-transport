@@ -9,15 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **The package is renamed `@vibeforge-systems/amqp-mcp-transport`,** and is published to npm from the next release. Moving from `amqp-mcp-transport` changes the dependency name and import specifier only. The exports, the exchange and the routing keys are the same, and so is the wire format. The release tarball is now `vibeforge-systems-amqp-mcp-transport-<version>.tgz`.
+- The client publishes requests `mandatory: true`. When no server queue is bound for a request's key, the broker returns it, and the call fails at once with JSON-RPC error `-32000` (`data.reason: "no-route"`, plus the exchange, routing key and broker reply). Before, the broker dropped the request and the call waited for the SDK's request timeout, 60 s by default. Only calls that could never have been answered behave differently. Client notifications are unchanged. See [TRANSPORT_CONTRACT.md](./docs/TRANSPORT_CONTRACT.md) §6.
 
 ### Added
 - `@vibeforge-systems/amqp-mcp-transport/binding`: binding-core, the first piece of 2.0.0. It is the wire rules of [docs/BINDING.md](./docs/BINDING.md) as pure functions, with no amqplib, no SDK and no I/O. It covers routing keys and topology (§4), inbound classification against the §7.4 fate table, mirror checks (§8), deadlines (§7.1), cancellation affinity with the bounded pre-arrival record (§6.4), the outbound property builders and dead-letter copy (§5.2, §7.4), `authInfo` derivation (§9.2) and the redelivery policy (§7.2). Pins P2, P3, P7, P8 and the unit half of P11 are named tests, and each is mutation-verified. The 1.x exports and behaviour are unchanged.
+- Both transports log a warning the first time a custom `routingKeyStrategy` returns a key outside its namespace, once per namespace. The broker drops such a message, and until now nothing said so. The message is still published, so a deployment that binds its own queues to custom keys keeps working.
 
 ### Documentation
 - The README, `docs/getting-started.md`, `docs/api-reference.md`, `docs/troubleshooting.md`, `docs/README.md` and `CONTRIBUTING.md` are rewritten against the code. `docs/configuration.md` and `docs/examples.md` are folded into the first two. The API reference no longer lists error classes and a `TransportMetrics` type that the package never exported.
 - New `SECURITY.md`, with the supported versions, private reporting and the security model, and `CODE_OF_CONDUCT.md`.
 - The February 2026 audit, the re-architecture plan and the engine-B spike move to `docs/history/`, each with a banner saying it is a dated record.
 - `NOTICE` names VibeForge Systems, Inc. as the copyright holder.
+- `AmqpServerRuntime` and `AmqpServerFactory` gave the wrong reason for building a new server on every attach. The SDK refuses only a server that is still bound to a transport (from SDK 1.26); the runtime builds a new one so that no server carries state from an earlier connection.
+- TRANSPORT_CONTRACT §6 now says how each side drops a bad message: the server nacks it without requeue, and the client acks and discards it.
 - [docs/history/spike-phase2-2026-10-28](./docs/history/spike-phase2-2026-10-28/README.md): the engine-B spike for 2.0.0, against SDK 2.4.0 and RabbitMQ 4.4.0, with its scripts.
   - Engine B passed every gate:
     - R1: an 81-tool per-request factory plus `fetch` costs 0.46 ms at p50 and 6.0 ms at p99;

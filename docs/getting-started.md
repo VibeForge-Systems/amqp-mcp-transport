@@ -158,7 +158,9 @@ retry.
 
 ## Timeouts
 
-A client call fails on the SDK's request timeout: 60 seconds by default. Set it per call:
+A request that no server is bound for fails at once with JSON-RPC error `-32000` and
+`data.reason: "no-route"`, because the broker returns it. A request that reaches a server but gets
+no answer fails on the SDK's request timeout: 60 seconds by default. Set it per call:
 
 ```ts
 await client.callTool({ name: "echo", arguments: { text: "hi" } }, undefined, { timeout: 10_000 });
@@ -210,7 +212,8 @@ const transport = new AMQPServerTransport({
 });
 ```
 
-The logger receives the transports' warnings, such as a failed teardown. Errors do not go to it.
+The logger receives the transports' warnings, such as a failed teardown or a routing key outside
+its namespace. Errors do not go to it.
 Connection failures, consumer cancels, dropped messages and response timeouts go only to the
 transport's `onerror`. With no `onerror` set, nothing reports them.
 
@@ -234,8 +237,10 @@ routingKeyStrategy: (message, routingType) => {
 ```
 
 Each key must stay inside its namespace: `mcp.request.#`, `mcp.client-notification.#` or
-`mcp.server-notification.#`, as `routingType` says. A key outside those patterns matches no queue,
-and the broker drops the message.
+`mcp.server-notification.#`, as `routingType` says. A key outside those patterns matches no queue.
+The broker returns such a request, which then fails with `no-route`, and drops such a
+notification. Each transport logs a warning the first time its strategy leaves a namespace, and
+still publishes the message.
 
 ## Run the examples
 

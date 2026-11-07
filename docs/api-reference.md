@@ -21,10 +21,14 @@ An MCP SDK `Transport` for a `Client`. `AmqpClientTransport` is the same class.
 - **`start()`** connects, declares the exchange, an exclusive reply queue and an exclusive
   notification queue bound to `mcp.server-notification.#`. `Client.connect()` calls it. It is
   idempotent and rejects if the broker is unreachable.
-- **`send(message)`** publishes a request under `mcp.request.<method>` with `replyTo` and a new
-  `correlationId`, or a notification under `mcp.client-notification.<method>`. It throws
-  `Transport not connected` while disconnected, and throws for a JSON-RPC response, since servers
-  send no requests over this transport.
+- **`send(message)`** publishes a request under `mcp.request.<method>` with `replyTo`, a new
+  `correlationId` and `mandatory: true`, or a notification under
+  `mcp.client-notification.<method>`. It throws `Transport not connected` while disconnected, and
+  throws for a JSON-RPC response, since servers send no requests over this transport.
+- **A request the broker returns unrouted fails at once.** The transport answers it with a
+  JSON-RPC error for the request's own id: `code` `-32000`, and `data`
+  `{ reason: "no-route", exchange, routingKey, replyCode, replyText }`. The SDK rejects the call
+  with an `McpError` carrying that code and data.
 - **`close()`** stops reconnecting, forgets pending requests, closes the channel and connection,
   and fires `onclose` once.
 - **`sessionId`** is a client-local UUID that prefixes each request's `correlationId`. It is not
@@ -115,7 +119,7 @@ extend them.
 | `queueTTL` | 300 000 ms | 7 200 000 ms | `x-expires` on the transport's queues |
 | `maxMessageSize` | 1 048 576 bytes | 1 048 576 bytes | Larger inbound messages are dropped and reported through `onerror` |
 | `responseTimeout` | 30 000 ms | | Stops tracking an unanswered request and reports it through `onerror`. The SDK call fails on its own timeout. |
-| `routingKeyStrategy` | default | default | `(message, routingType) => string`. Must keep each key inside its namespace. |
+| `routingKeyStrategy` | default | default | `(message, routingType) => string`. Must keep each key inside its namespace. A key outside it is logged once per namespace. |
 | `logger` | stderr | stderr | `TransportLogger`: `debug`, `info`, `warn`, `error`. The default prints warnings and errors. |
 
 ## Utilities

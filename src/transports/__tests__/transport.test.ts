@@ -521,11 +521,14 @@ describe('AMQPServerTransport', () => {
         });
 
         it('custom routingKeyStrategy (C7)', async () => {
-            const t = new AMQPServerTransport({ ...opts, routingKeyStrategy: (m, tt) => `x.${tt}.${'method' in m ? m.method : ''}` });
+            const logger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+            const t = new AMQPServerTransport({ ...opts, logger, routingKeyStrategy: (m, tt) => `x.${tt}.${'method' in m ? m.method : ''}` });
             t._connectFn = makeConnectFn(conn);
             await startTransport(t);
             await t.send({ jsonrpc: '2.0', method: 'foo' } as any);
             expect(ch._published[0]!.routingKey).toBe('x.server-notification.foo');
+            // 'x.' is outside mcp.server-notification.#, so no client would receive it.
+            expect(logger.warn).toHaveBeenCalledTimes(1);
         });
     });
 });

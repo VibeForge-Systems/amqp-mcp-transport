@@ -6,10 +6,11 @@
  *  - In-transport reconnect (inside AMQPServerTransport): same transport,
  *    same server, same queue name.
  *  - Runtime recovery (here), after the transport has closed for good: a NEW
- *    transport and a NEW server from the factory.  The MCP SDK refuses to bind
- *    one server to a second transport, so a server is never reused across
- *    attaches.  In-flight requests at that point are never answered; clients
- *    own timeout and retry.
+ *    transport and a NEW server from the factory.  A server is never reused
+ *    across attaches, so none carries state from an earlier connection, such
+ *    as the client capabilities that `initialize` recorded.  In-flight
+ *    requests at that point are never answered; clients own timeout and
+ *    retry.
  *
  * Recovery retries with exponential backoff and reports its state through
  * {@link AmqpServerRuntime.getStatus} for health endpoints.
@@ -45,9 +46,11 @@ export interface AmqpServerRuntimeOptions {
 export class AmqpServerRuntime<TServer extends ConnectableServer = ConnectableServer> {
     private transport: RuntimeManagedTransport | null = null;
     private serverFactory: AmqpServerFactory<TServer> | null = null;
-    // The server bound to the current transport. Replaced on every attach: the
-    // SDK refuses to rebind one server to a second transport, so reusing it
-    // across reconnects fails permanently with "Already connected to a transport".
+    // The server bound to the current transport. Replaced on every attach, so no
+    // server carries state from an earlier connection. The SDK refuses only a
+    // server that is still bound: from SDK 1.26 on, connecting one throws
+    // "Already connected to a transport". Once a transport has closed, the SDK
+    // would accept its server again.
     private server: TServer | null = null;
     private config: AmqpRuntimeConfig | null = null;
     private recoveryTimer: ReturnType<typeof setTimeout> | null = null;
