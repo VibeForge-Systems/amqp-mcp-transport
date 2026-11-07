@@ -27,8 +27,8 @@ An MCP SDK `Transport` for a `Client`. `AmqpClientTransport` is the same class.
   send no requests over this transport.
 - **`close()`** stops reconnecting, forgets pending requests, closes the channel and connection,
   and fires `onclose` once.
-- **`sessionId`** is a client-local UUID that namespaces correlation ids. It is not an MCP session
-  and never goes on the wire. Because it is set, `Client.connect()` skips `initialize`.
+- **`sessionId`** is a client-local UUID that prefixes each request's `correlationId`. It is not
+  an MCP session. Because it is set, `Client.connect()` skips `initialize`.
 - **`onmessage`, `onerror`, `onclose`** are the SDK's callbacks.
 
 Reconnecting gives the client a new reply queue, so a response to a request sent before the
@@ -73,9 +73,9 @@ closes for good. `NativeAmqpRuntimeAdapter` is the same class.
 
 | Method | Returns | Does |
 | --- | --- | --- |
-| `start(factory, config)` | `Promise<AmqpRuntimeStartResult>` | Attaches a transport and a server from `factory.create()`. Never throws for a broker failure: it returns `{ started: false, error }` and schedules recovery. Returns `{ started: false }` without connecting when `config.enabled` is `false`. |
+| `start(factory, config)` | `Promise<AmqpRuntimeStartResult>` | Attaches a transport and a server from `factory.create()`. Never throws: a broker failure, an invalid config or a throwing `create()` returns `{ started: false, error }` and schedules recovery, which retries even an invalid config. Returns `{ started: false }` without connecting when `config.enabled` is `false`. |
 | `stop()` | `Promise<void>` | Cancels recovery, closes the transport and releases the server. |
-| `getStatus()` | `AmqpTransportStatus` | The transport's status plus `recovery`: `state` (`disabled`, `idle`, `waiting`, `attempting`, `stopped`), `retryCount`, `nextRetryAt`, `lastAttemptAt`, `lastError`. |
+| `getStatus()` | `AmqpTransportStatus` | The attached transport's status, or `{ enabled, connected: false }` while none is attached, plus `recovery`: `state` (`disabled`, `idle`, `waiting`, `attempting`, `stopped`), `retryCount`, `nextRetryAt`, `lastAttemptAt`, `lastError`. |
 | `send(notification, options?)` | `Promise<void>` | Publishes a server notification through the current transport. Throws when there is none. |
 
 **`AmqpServerFactory<TServer>`** has `create(): Promise<TServer>`, called on every attach, and an
@@ -130,22 +130,38 @@ The routing helpers are what the transports themselves use.
 | `getRoutingKey` | `(message, routingType, strategy?) => string` | Applies `strategy`, or the default |
 | `normalizeMethodForRouting` | `(method) => string` | Replaces `/` with `.` |
 | `parseMessage` | `(content: Buffer \| string) => ParseResult` | Parses and validates; never throws |
-| `validateJSONRPC` | `(obj: unknown) => JSONRPCMessage` | Throws if `obj` is not a JSON-RPC 2.0 message |
+| `validateJSONRPC` | `(obj: unknown) => JSONRPCMessage` | Throws unless `obj` has `jsonrpc: "2.0"` and either a string `method` or a `result` or `error`. It does not check `id`. |
 | `detectMessageType` | `(message) => 'request' \| 'response' \| 'notification'` | Classifies a message |
 | `isJSONRPCRequest`, `isJSONRPCNotification` | type guards | |
 | `sanitizeJsonRpcMessage` | `(message) => JSONRPCMessage` | Copies a message, sets `jsonrpc: "2.0"` if missing and removes `_rabbitMQ*` keys |
 | `validateAmqpConfig` | `(config) => string[]` | The server constructor's checks; empty when valid |
 | `generateSessionId`, `generateCorrelationId` | `() => string`, `(sessionId) => string` | The ids the transports use |
 | `createDefaultLogger` | `(scope) => TransportLogger` | The default stderr logger |
-| `getDefaultConfig` | `() => DefaultAMQPConfig` | Reads `AMQP_URL`, `AMQP_EXCHANGE` and other `AMQP_*` variables, with defaults |
+| `getDefaultConfig` | `() => DefaultAMQPConfig` | Reads `AMQP_URL`, `AMQP_QUEUE_PREFIX`, `AMQP_EXCHANGE` and other `AMQP_*` variables. Its keys are those variable names, not option names, and its defaults (exchange `mcp.notifications`, prefetch 1) are not the transports'. |
 | `createLogEntry` | `(transport, sessionId, operation, data?) => LogEntry` | A timestamped log record |
 
-**Kept for Open Discovery compatibility.** Neither function checks a live connection, so use
-`getStatus()` instead.
+**Kept for Open Discovery compatibility.** Prefer `getStatus()`.
 
-- `testAmqpConnection` expects an object with a public `connection`, which neither transport
-  class has. It declares a `mcp.heartbeat` fanout exchange on the broker as a side effect.
-- `getAmqpStatus` reports `connected: true` for any non-null argument.
+- `testAmqpConnection(transport)` opens a channel on `transport.connection`, declares a
+  `mcp.heartbeat` fanout exchange on the broker and publishes to it. TypeScript rejects passing
+  either transport class, whose `connection` is private; from JavaScript it runs.
+- `getAmqpStatus` reports `connected: true` for any non-null argument. It does not check a
+  connection.
+
+## Types
+
+Besides the option and config types above, the package exports these for TypeScript:
+
+| Type | What it is |
+| --- | --- |
+| `AmqpTransportStatus`, `AmqpRecoveryStatus`, `AmqpRecoveryState` | What `getStatus()` returns |
+| `AmqpRuntimeConfig`, `AmqpRuntimeStartResult`, `AmqpServerFactory`, `AmqpServerRuntimeOptions` | `AmqpServerRuntime`'s inputs and result |
+| `ConnectableServer` | Anything with `connect(transport)`: `McpServer` and `Server` |
+| `RuntimeManagedTransport` | The part of a server transport the runtime uses |
+| `AMQPConnection`, `ConnectionState` | The connection shape the transports need, and their connection state |
+| `RoutingKeyStrategy`, `RoutingMessageType`, `TransportLogger` | The strategy, its namespaces, and the logger |
+| `ParseResult`, `DefaultAMQPConfig`, `LogEntry`, `HealthCheckResult`, `AMQPStatus`, `AutoRecoveryConfig` | The utilities' results and inputs |
+| `JSONRPCMessage`, `JSONRPCNotification`, `RequestId`, `MessageExtraInfo`, `Transport`, `TransportSendOptions` | Re-exported from the SDK |
 
 ## binding-core
 

@@ -11,6 +11,9 @@ the 2025-era protocol through `@modelcontextprotocol/sdk` v1. Every option and d
 - `@modelcontextprotocol/sdk` 1.17.1 or later, below 2. It is a peer dependency, so your
   application installs it.
 - RabbitMQ. The examples run against 3.12 and 4.4. Other AMQP 0-9.1 brokers are untested.
+- `zod`, for the server example's input schema: `npm install zod`.
+
+The snippets use top-level `await`, so run them as ES modules.
 
 ## Install
 
@@ -24,8 +27,8 @@ The npm package is published from the next release on. Until then, install from 
 npm install github:VibeForge-Systems/amqp-mcp-transport
 ```
 
-The `prepare` script builds it on install. The package is ESM. CommonJS code on Node 22.12 or
-later can `require()` it.
+That installs `main`, and the `prepare` script builds it on install. The package is ESM.
+CommonJS code on Node 20.19 or later, or 22.12 or later, can `require()` it.
 
 ## Start a broker
 
@@ -111,12 +114,18 @@ connects.
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { AmqpServerRuntime } from "@vibeforge-systems/amqp-mcp-transport";
 
-const runtime = new AmqpServerRuntime<McpServer>({ logger: myLogger });
+function buildServer(): McpServer {
+  const server = new McpServer({ name: "echo-server", version: "1.0.0" });
+  // register tools, resources and prompts here
+  return server;
+}
+
+const runtime = new AmqpServerRuntime<McpServer>();
 
 const result = await runtime.start(
   {
-    create: async () => buildServer(),         // a new McpServer on every attach
-    release: (server) => forget(server),       // optional: the server's transport has gone
+    create: async () => buildServer(),         // called on every attach
+    release: (server) => {},                   // optional: that server's transport has gone
   },
   {
     enabled: true,
@@ -131,12 +140,15 @@ const result = await runtime.start(
 );
 ```
 
-- **`start()` does not throw when the broker is down.** It returns `{ started: false, error }` and
-  keeps retrying in the background, unless `autoRecoveryEnabled` is `false`.
-- **`create()` must return a new server each time.** Register your tools, resources and prompts
-  inside it. A server is never reused across attaches.
-- **`getStatus()` is what a health endpoint needs.** It reports `connected`, the exchange and
-  queue prefix, the last error, and the recovery loop's state, retry count and next retry time.
+- **`start()` does not throw.** A broker failure, an invalid config or a `create()` that throws
+  comes back as `{ started: false, error }`, and recovery keeps retrying in the background unless
+  `autoRecoveryEnabled` is `false`. It retries an invalid config too, which never succeeds, so
+  check `result.error`.
+- **Build a new server in `create()`.** The runtime calls it on every attach and binds whatever it
+  returns. A fresh server carries no state from an earlier connection.
+- **`getStatus()` is what a health endpoint needs.** It reports `connected` and the recovery
+  loop's retry count, next retry time and last error. While a transport is attached, it also
+  reports the exchange, the queue prefix and the transport's last error.
 - **`stop()` cancels recovery and closes the transport.** Call it on shutdown.
 - **`send()` publishes a server notification** through whichever transport is current, such as
   `notifications/tools/list_changed`. It accepts notifications only.
@@ -156,6 +168,9 @@ The transport's `responseTimeout` (default 30 seconds) is separate. When it expi
 stops tracking the request and reports it through `onerror`, but the call itself still waits for
 the SDK timeout. A response that arrives after `responseTimeout` is still delivered.
 
+When the SDK gives up on a call, it sends `notifications/cancelled`. The 1.x server does not act on
+it, so the tool runs to completion, and the client reports the late response through `onerror`.
+
 ## TLS, virtual hosts and heartbeats
 
 The transport passes `amqpUrl` to `amqplib.connect()` unchanged, so everything is set in the URL:
@@ -165,7 +180,8 @@ amqps://user:password@broker.example.com:5671/my-vhost?heartbeat=30
 ```
 
 - **`amqps://`** connects with TLS and verifies the broker against Node's default CA bundle. For a
-  private CA, set `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` in the process environment.
+  private CA, set `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` in the environment before Node starts.
+  Node reads it only at startup.
 - **Client certificates are not supported.** The transport passes no socket options to
   `amqplib`, so mutual TLS is out of reach in 1.x. Authenticate with a username and password.
 - **The path is the virtual host.** Percent-encode it: `/` as the vhost is `%2F`.
@@ -177,14 +193,15 @@ Percent-encode any reserved characters in the username or password.
 ## Logging
 
 Both transports and the runtime accept a `logger` with `debug`, `info`, `warn` and `error`
-methods. The default writes warnings and errors to stderr and drops the rest.
+methods. The default writes warnings and errors to stderr and drops the rest. The runtime passes
+its logger to each transport it builds.
 
 ```ts
 const transport = new AMQPServerTransport({
   amqpUrl: process.env.AMQP_URL!,
   exchangeName: "mcp.examples",
   queuePrefix: "mcp.example",
-  logger: {
+  logger: {                                   // log is your application's logger
     debug: (msg, ctx) => log.debug(ctx, msg),
     info: (msg, ctx) => log.info(ctx, msg),
     warn: (msg, ctx) => log.warn(ctx, msg),
@@ -193,9 +210,17 @@ const transport = new AMQPServerTransport({
 });
 ```
 
-Errors that concern a message or the connection also go to the transport's `onerror`. On
-`connect()`, the SDK keeps any `onerror` you set on the transport and forwards every error to the
-`onerror` of your `Client` or `Server` as well, so set either one to see them.
+The logger receives the transports' warnings, such as a failed teardown. Errors do not go to it.
+Connection failures, consumer cancels, dropped messages and response timeouts go only to the
+transport's `onerror`. With no `onerror` set, nothing reports them.
+
+On `connect()`, the SDK keeps any `onerror` you set on the transport and forwards every error to
+the `onerror` of your `Client` or `Server` as well, so set either one:
+
+```ts
+server.server.onerror = (error) => log.error({ error }, "AMQP transport error"); // McpServer
+client.onerror = (error) => log.error({ error }, "AMQP transport error");
+```
 
 ## Custom routing keys
 
@@ -221,5 +246,7 @@ npm run example:server       # terminal 1
 npm run example:client       # terminal 2
 ```
 
-Both read `AMQP_URL`, and `AMQP_EXCHANGE` if set (default `mcp.examples`). The client lists the
-server's tools, resources and prompts, calls a tool and reads a resource.
+Both read `AMQP_URL` and `AMQP_EXCHANGE` (default `mcp.examples`). Without `AMQP_URL` they use
+`amqp://guest:guest@localhost:5672`, which the compose broker refuses, so export `AMQP_URL` in
+both terminals. The client lists the server's tools, resources and prompts, calls a tool and reads
+a resource.

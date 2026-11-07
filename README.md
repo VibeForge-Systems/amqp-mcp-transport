@@ -64,15 +64,16 @@ npm install @vibeforge-systems/amqp-mcp-transport @modelcontextprotocol/sdk
 ```
 
 - **The npm package is published from the next release on.** Until then, install from GitHub:
-  `npm install github:VibeForge-Systems/amqp-mcp-transport`. The `prepare` script builds it on
-  install.
+  `npm install github:VibeForge-Systems/amqp-mcp-transport`. That installs `main`, which already
+  carries the new name. The `prepare` script builds it on install.
 - **v1.2.0 and earlier are named `amqp-mcp-transport`.** None of them was published to npm. The
   v1.2.0 tarball is attached to its
   [GitHub release](https://github.com/VibeForge-Systems/amqp-mcp-transport/releases/tag/v1.2.0).
   The wire format did not change with the name.
 - **The SDK is a peer dependency** (`>=1.17.1 <2`), so the transport shares your application's SDK
   instance. `amqplib` is a regular dependency and installs with the package.
-- **The package is ESM.** CommonJS code on Node 22.12 or later can `require()` it.
+- **The package is ESM.** CommonJS code on Node 20.19 or later, or 22.12 or later, can
+  `require()` it.
 
 ---
 
@@ -215,6 +216,9 @@ All traffic goes through one durable topic exchange, `${exchangeName}.mcp.routin
   return `undefined`, and `enforceStrictCapabilities` fails every call that needs a capability.
 - **Server notifications are broadcast.** Every connected client receives every server
   notification, progress and log messages included.
+- **Cancellation does not reach the server.** When a call times out or is aborted, the SDK client
+  sends `notifications/cancelled`. The server transport rewrites request ids but not the id inside
+  a cancellation, so the server never matches it, and the tool runs to completion.
 - **No delivery guarantee.** The endpoint queue is not durable. A request in flight when the
   server goes away is not answered, and the broker drops a request published while no server is
   bound. The call fails only when the SDK's own request timeout expires: 60 s by default, or the
@@ -291,7 +295,8 @@ npm run typecheck
 npm run build        # dist/
 ```
 
-- **CI.** `.github/workflows/ci.yml` runs lint, build and the tests on Node 18, 20 and 22.
+- **CI.** `.github/workflows/ci.yml` runs lint, the typecheck, the build, the tests on Node 18, 20
+  and 22, and the examples build.
 - **Releases.** A `vX.Y.Z` tag builds, tests and packs the package, then publishes a GitHub Release
   with the tarball and its SHA-256 attached. Publishing to npm is a separate, manual workflow.
 

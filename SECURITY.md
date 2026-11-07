@@ -42,6 +42,12 @@ security is mostly broker security.
   bound to it. A principal that can bind a queue to that exchange can read every request, and
   every server notification. Give each server and client its own broker user, and restrict
   what each may configure, write and read with RabbitMQ's per-vhost permissions.
+- **Know what the permissions allow.** Both sides declare the routing exchange, so each needs
+  configure permission on it, which in RabbitMQ also allows deleting it. Write permission on the
+  exchange lets a client publish under `mcp.server-notification.` and impersonate the server to
+  every other client. RabbitMQ topic permissions can stop that: restrict a client's write
+  routing keys to `^mcp\.(request|client-notification)\.`. Responses travel through the
+  default exchange to each client's reply queue.
 - **Use TLS beyond a trusted network.** `amqp://` sends credentials and messages in clear text.
   Use `amqps://`. The transport verifies the broker's certificate against Node's CA bundle.
 - **The bundled credentials are placeholders.** `docker-compose.yml` publishes ports 5672 and

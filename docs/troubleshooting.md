@@ -12,8 +12,9 @@ compose file), or in `rabbitmqctl list_bindings`.
 - **Its bindings** should include one queue named `mcp.example.requests.<uuid>`, bound twice: to
   `mcp.request.#` and to `mcp.client-notification.#`. That queue is the server. No such queue
   means no server is running on this exchange.
-- **Each connected client** adds two server-named `amq.gen-…` queues: a reply queue with no
-  binding, and a notification queue bound to `mcp.server-notification.#`.
+- **Each connected client** adds two server-named `amq.gen-…` queues: a reply queue, bound only
+  to the default exchange like every queue, and a notification queue bound to
+  `mcp.server-notification.#`.
 
 ## `connect()` rejects
 
@@ -27,7 +28,7 @@ The SDK calls `transport.start()`, so broker errors surface from `client.connect
 | `NOT_ALLOWED` (530) on vhost | The virtual host in the URL path does not exist, or the user has no permissions on it. |
 | `PRECONDITION_FAILED` (406) on the exchange | Something else declared `mcp.examples.mcp.routing` with a different type or durability. Delete it, or pick another `exchangeName`. |
 | TLS errors such as `self-signed certificate` | The broker's certificate does not chain to a trusted CA. Set `NODE_EXTRA_CA_CERTS`. A TLS handshake against a plain `amqp` port fails too. |
-| `Invalid AMQP server transport configuration` | Thrown by the server constructor: a URL scheme other than `amqp:` or `amqps:`, `reconnectDelay` under 1000, or `maxReconnectAttempts` or `prefetchCount` under 1. |
+| `Invalid AMQP server transport configuration` | Thrown by the server constructor: a URL scheme other than `amqp:` or `amqps:`, `reconnectDelay` under 1000, or `maxReconnectAttempts` or `prefetchCount` under 1. Under `AmqpServerRuntime` it arrives in `start()`'s `result.error` instead, and recovery retries it forever. |
 
 ## Calls hang, then fail with `MCP error -32001: Request timed out`
 
@@ -40,18 +41,20 @@ came back. In order of likelihood:
    `mcp.request.` matches no queue.
 3. **The server went away mid-request,** or its transport was rebuilt. In-flight requests are
    never answered. Retry.
-4. **The tool is slower than the timeout.** Pass a larger `timeout` to the call.
+4. **The tool is slower than the timeout.** Pass a larger `timeout` to the call. The server does
+   not act on the SDK's cancellation, so the tool still runs to completion.
 
 ## `Request timeout after 30000ms` in `onerror`, but the call succeeds
 
 The transport's `responseTimeout` (30 seconds by default) expired before the response arrived. It
-only reports; the response is still delivered and the call still completes. For tools that
-routinely run longer, raise `responseTimeout` to match your call timeouts.
+only reports; the response is still delivered and the call still completes. `responseTimeout`
+applies to every request on the transport, so set it above your longest per-call `timeout`.
 
 ## Every request is answered twice, or tools run twice
 
 Two servers are bound to the same exchange. A topic exchange copies each request to every bound
-queue, so both servers run it, and the client receives two responses. Give each server its own
+queue, so both servers run it. The client takes the first response and reports the second
+through `onerror` as `Received a response for an unknown message ID`. Give each server its own
 `exchangeName`.
 
 ## `getServerCapabilities()` returns `undefined`
@@ -67,7 +70,7 @@ A tool handler asked the client for something: sampling (`createMessage`), elici
 (`elicitInput`) or `roots/list`. Those are server-to-client requests, which 1.x does not carry.
 The handler has to work without them.
 
-## `Incoming message exceeds maxMessageSize`
+## `Incoming message exceeds maxMessageSize`, or `Incoming notification exceeds…`
 
 The receiving side dropped a message over `maxMessageSize`, 1 MiB by default. A server rejects it
 without requeue. A client discards it, so the call then times out. Raise `maxMessageSize` on the
@@ -76,15 +79,14 @@ arguments.
 
 ## The server stops answering after a broker restart
 
-The transport retries every `reconnectDelay` (5 seconds) up to `maxReconnectAttempts` (10). After
-that, it reports `Maximum reconnection attempts exceeded` and closes for good. A server on a bare
-transport stays down. Run it under `AmqpServerRuntime`, which keeps rebuilding it. Its
-`getStatus().recovery` shows the next retry.
+The transport retries every `reconnectDelay` (5 seconds) up to `maxReconnectAttempts` (10), about
+50 seconds in all. After that it closes for good. A client reports `Maximum reconnection attempts
+exceeded` through `onerror`. A server reports nothing through `onerror`: it fires
+`ontransportclosed` with the last connection error, and `getStatus().error` shows it.
 
-## `Already connected to a transport`
-
-A server was bound to a second transport. With `AmqpServerRuntime`, `create()` must build a new
-server every time it is called, not return one it built earlier.
+A server on a bare transport stays down. Run it under `AmqpServerRuntime`, which keeps rebuilding
+it, or raise `maxReconnectAttempts` to cover your longest outage. `getStatus().recovery` shows the
+runtime's next retry.
 
 ## `AMQP broker cancelled the consumer on '…'`
 
@@ -104,7 +106,8 @@ it is not waiting on through `onerror`.
 
 ## `ERR_REQUIRE_ESM`
 
-The package is ESM. Node 22.12 and later can `require()` it. On older Node, use `import()`.
+The package is ESM. Node 20.19 and later, or 22.12 and later, can `require()` it. On older Node,
+use `import()`.
 
 ## Still stuck
 
