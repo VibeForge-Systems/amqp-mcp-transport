@@ -1,20 +1,19 @@
 # AMQP transport contract (v1.x)
 
-- **Status:** Normative for `amqp-mcp-transport` 1.x. The tests in
+- **Status:** Normative for 1.x of this package. The tests in
   `src/transports/__tests__/contract.test.ts` carry each clause by number.
-- **Origin:** This is Open Discovery 3.0's ratified AMQP extension-transport contract
-  (`mcp_open_discovery_3_0/docs/AMQP_SESSION_MODEL.md` §6, ratified 2026-08-19), with three
-  changes:
+- **Origin:** This is MCP Open Discovery's ratified AMQP extension-transport contract (its
+  `docs/AMQP_SESSION_MODEL.md` §6, ratified 2026-08-19), with three changes:
   1. It adds the client-side rules that contract did not need, because Open Discovery ships no
      client.
   2. It makes the server transport *reject* outbound requests (§5) rather than relying on its
      callers never to send one.
   3. It records the wire changes from 1.0.0 (§7).
-- **Scope:** The 2025-era MCP protocol (`initialize` handshake, SDK v1). Moving to the stateless
-  MCP 2026-07-28 protocol is planned in
-  [REARCHITECTURE_PLAN_2026-07-28.md](./REARCHITECTURE_PLAN_2026-07-28.md), which proposes
+- **Scope:** The 2025-era MCP protocol, served through SDK v1. The move to the stateless MCP
+  2026-07-28 protocol was planned in
+  [the re-architecture plan](./history/REARCHITECTURE_PLAN_2026-07-28.md), which proposed
   superseding §1, §4 and §6 below. The draft 2.x binding is [BINDING.md](./BINDING.md). Until
-  that lands, this document is what the code does.
+  2.0.0 ships, this document is what the code does.
 
 ## Topology
 
@@ -117,4 +116,4 @@ bound. This had three effects:
 
 1.2.0 adopts Open Discovery's namespaces above. A 1.0.0 client and a 1.2.0 server still exchange
 requests and responses, but **not notifications**. Upgrade both sides together. Open
-Discovery 3.0 already speaks the 1.2.0 wire format.
+Discovery already speaks the 1.2.0 wire format.

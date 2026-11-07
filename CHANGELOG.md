@@ -7,11 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The package is renamed `@vibeforge-systems/amqp-mcp-transport`,** and is published to npm from the next release. Moving from `amqp-mcp-transport` changes the dependency name and import specifier only. The exports, the exchange and the routing keys are the same, and so is the wire format. The release tarball is now `vibeforge-systems-amqp-mcp-transport-<version>.tgz`.
+
 ### Added
-- `amqp-mcp-transport/binding`: binding-core, the first piece of 2.0.0. It is the wire rules of [docs/BINDING.md](./docs/BINDING.md) as pure functions, with no amqplib, no SDK and no I/O. It covers routing keys and topology (§4), inbound classification against the §7.4 fate table, mirror checks (§8), deadlines (§7.1), cancellation affinity with the bounded pre-arrival record (§6.4), the outbound property builders and dead-letter copy (§5.2, §7.4), `authInfo` derivation (§9.2) and the redelivery policy (§7.2). Pins P2, P3, P7, P8 and the unit half of P11 are named tests, and each is mutation-verified. The 1.x exports and behaviour are unchanged.
+- `@vibeforge-systems/amqp-mcp-transport/binding`: binding-core, the first piece of 2.0.0. It is the wire rules of [docs/BINDING.md](./docs/BINDING.md) as pure functions, with no amqplib, no SDK and no I/O. It covers routing keys and topology (§4), inbound classification against the §7.4 fate table, mirror checks (§8), deadlines (§7.1), cancellation affinity with the bounded pre-arrival record (§6.4), the outbound property builders and dead-letter copy (§5.2, §7.4), `authInfo` derivation (§9.2) and the redelivery policy (§7.2). Pins P2, P3, P7, P8 and the unit half of P11 are named tests, and each is mutation-verified. The 1.x exports and behaviour are unchanged.
 
 ### Documentation
-- [docs/spikes/phase2-2026-10-28](./docs/spikes/phase2-2026-10-28/README.md): the engine-B spike for 2.0.0, against SDK 2.4.0 and RabbitMQ 4.4.0, with its scripts.
+- The README, `docs/getting-started.md`, `docs/api-reference.md`, `docs/troubleshooting.md`, `docs/README.md` and `CONTRIBUTING.md` are rewritten against the code. `docs/configuration.md` and `docs/examples.md` are folded into the first two. The API reference no longer lists error classes and a `TransportMetrics` type that the package never exported.
+- New `SECURITY.md`, with the supported versions, private reporting and the security model, and `CODE_OF_CONDUCT.md`.
+- The February 2026 audit, the re-architecture plan and the engine-B spike move to `docs/history/`, each with a banner saying it is a dated record.
+- `NOTICE` names VibeForge Systems, Inc. as the copyright holder.
+- [docs/history/spike-phase2-2026-10-28](./docs/history/spike-phase2-2026-10-28/README.md): the engine-B spike for 2.0.0, against SDK 2.4.0 and RabbitMQ 4.4.0, with its scripts.
   - Engine B passed every gate:
     - R1: an 81-tool per-request factory plus `fetch` costs 0.46 ms at p50 and 6.0 ms at p99;
     - R2: `Mcp-Param-*` synthesis works;
@@ -27,14 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] - 2026-10-22
 
-Consolidates the AMQP transport that Open Discovery 3.0 runs in production into this package, which is now its canonical home. The normative wire behaviour is [docs/TRANSPORT_CONTRACT.md](./docs/TRANSPORT_CONTRACT.md).
+Consolidates the AMQP transport that MCP Open Discovery runs in production into this package, which is now its canonical home. The normative wire behaviour is [docs/TRANSPORT_CONTRACT.md](./docs/TRANSPORT_CONTRACT.md).
 
 ### Security
 - **Cross-client response leak fix** (first shipped in 1.1.1, below). The server keyed response routing by the client-chosen JSON-RPC id, so two concurrent clients that both sent `id: 1` could receive each other's responses. Request ids are now rewritten to a unique internal id before the SDK sees them, and the client's id is restored on the way out (ported from Open Discovery `7ba522f`).
 - Clients no longer receive other clients' notifications. They bind only the server-notification namespace.
 
 ### Changed (wire)
-- Notifications are split into `mcp.client-notification.*` (consumed by the server) and `mcp.server-notification.*` (consumed by clients), replacing the shared `mcp.notification.*`. Servers no longer consume their own notifications. **A 1.0/1.1 client and a 1.2 server still exchange requests and responses, but not notifications: upgrade both together.** Open Discovery 3.0 already uses the 1.2 wire format.
+- Notifications are split into `mcp.client-notification.*` (consumed by the server) and `mcp.server-notification.*` (consumed by clients), replacing the shared `mcp.notification.*`. Servers no longer consume their own notifications. **A 1.0/1.1 client and a 1.2 server still exchange requests and responses, but not notifications: upgrade both together.** MCP Open Discovery already uses the 1.2 wire format.
 - The server transport rejects outbound requests. Previously they looped back into its own queue. The client transport rejects outbound responses. Previously they were published to an unbound routing key and dropped.
 
 ### Changed (API)
@@ -48,7 +55,7 @@ Consolidates the AMQP transport that Open Discovery 3.0 runs in production into 
 - Reconnect tears down the old connection first, at most one reconnect is scheduled at a time, and `onclose` fires exactly once.
 - `ontransportclosed`, `getStatus()` and a `logger` option on the server transport. `AmqpServerTransport` / `AmqpClientTransport` are exported as aliases.
 - Contract tests (`contract.test.ts`), ported from Open Discovery, and an end-to-end test through the real MCP SDK with two concurrent clients reusing request ids (`sdk-e2e.test.ts`).
-- `docs/TRANSPORT_CONTRACT.md` and `docs/REARCHITECTURE_PLAN_2026-07-28.md`.
+- `docs/TRANSPORT_CONTRACT.md` and `docs/REARCHITECTURE_PLAN_2026-07-28.md` (now in `docs/history/`).
 
 ### Fixed (packaging)
 - The build now emits `dist/index.js`, which `main` pointed at but which previously did not exist. The package also has an `exports` map, and a `prepare` script so `npm install github:VibeForge-Systems/amqp-mcp-transport#<ref>` builds on install.
@@ -59,7 +66,7 @@ Consolidates the AMQP transport that Open Discovery 3.0 runs in production into 
 ## [1.1.1] - 2026-10-22
 
 ### Security
-- **Fixed a cross-client response leak in `AMQPServerTransport`.** Response routing was keyed by the client-chosen JSON-RPC `id`. Every client numbers its requests from the same start, so when two clients had a request with the same id in flight, the second overwrote the first's `{replyTo, correlationId}` and a response could reach the wrong client. Request ids are now rewritten to a server-minted internal id before the SDK sees them, and the client's own id is restored on the response. The wire format is unchanged. Ported from Open Discovery 3.0 (`7ba522f`).
+- **Fixed a cross-client response leak in `AMQPServerTransport`.** Response routing was keyed by the client-chosen JSON-RPC `id`. Every client numbers its requests from the same start, so when two clients had a request with the same id in flight, the second overwrote the first's `{replyTo, correlationId}` and a response could reach the wrong client. Request ids are now rewritten to a server-minted internal id before the SDK sees them, and the client's own id is restored on the response. The wire format is unchanged. Ported from MCP Open Discovery (`7ba522f`).
 - Added a two-clients-same-id regression test, and an end-to-end test through the real MCP SDK with two concurrent clients (`sdk-e2e.test.ts`).
 
 ### Fixed (build/CI)

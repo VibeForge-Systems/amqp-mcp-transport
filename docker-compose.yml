@@ -1,5 +1,4 @@
 # Docker Compose for RabbitMQ development environment
-version: '3.8'
 
 services:
   rabbitmq:

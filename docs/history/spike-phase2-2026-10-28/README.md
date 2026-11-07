@@ -1,8 +1,11 @@
 # Phase 2 spike: engine B go/no-go (2026-10-28)
 
+> **Historical record (2026-10-28).** This spike measured SDK 2.4.0 and RabbitMQ 4.4.0 on its date,
+> and is not maintained. Its findings are carried into [BINDING.md](../../BINDING.md).
+
 - **Question:** can `serveAmqp` bridge each AMQP exchange to `@modelcontextprotocol/server`'s
   `createMcpHandler().fetch()`? That is engine B, decision D-2 of
-  [the re-architecture plan](../../REARCHITECTURE_PLAN_2026-07-28.md) §5.2. The alternative is
+  [the re-architecture plan](../REARCHITECTURE_PLAN_2026-07-28.md) §5.2. The alternative is
   engine C, a native serving entry. The plan set four gates: R1–R3, plus open item O-2 of
   [BINDING.md](../../BINDING.md) §14.
 - **Answer:** **go for engine B.** All four gates pass. Three findings change how the bridge is
@@ -192,10 +195,11 @@ SDK 1.x until the scaffolding task lands:
 ```sh
 mkdir /tmp/sdk2 && cd /tmp/sdk2 && npm init -y
 npm i @modelcontextprotocol/server@2.4.0 @modelcontextprotocol/client@2.4.0 @modelcontextprotocol/core@2.4.0 zod@4 amqplib
-cp /path/to/AMQPConnectorforMCP/docs/spikes/phase2-2026-10-28/*.{mjs,cjs} .
+TRANSPORT_REPO=~/src/amqp-mcp-transport   # your checkout of this repository
+cp "$TRANSPORT_REPO"/docs/history/spike-phase2-2026-10-28/*.{mjs,cjs} .
 # R1. First dump od-tools.json from an Open Discovery checkout after
 # `npm run build:ts && npm run build:plugins`:
-OD_REPO=/path/to/mcp_open_discovery_3_0 OUT=$PWD/od-tools.json node dump-od-tools.cjs
+OD_REPO=~/src/mcp-open-discovery OUT=$PWD/od-tools.json node dump-od-tools.cjs
 TOOLS=od-tools.json N=2000 node r1-factory-bench.mjs hoisted   # or: naive | preload
 # R2 and R3:
 node r2-r3-engine-b.mjs

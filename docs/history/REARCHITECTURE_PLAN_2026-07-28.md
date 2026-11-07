@@ -1,13 +1,18 @@
 # Re-architecture plan: AMQP transport for MCP 2026-07-28
 
+> **Historical record (2026-10-22 to 2026-10-28).** This is the plan for 2.0.0 as written, with
+> its decision log, and it is not maintained. The ratified design is [BINDING.md](../BINDING.md).
+> D-6 was later decided: the package is `@vibeforge-systems/amqp-mcp-transport`, under Apache-2.0.
+> Repository names have been changed to their public names; nothing else has.
+
 - **Status:** Proposed. Several items need a maintainer decision (§10). One of them supersedes
-  clauses of a contract already ratified in `mcp_open_discovery_3_0` (§7).
+  clauses of a contract already ratified in MCP Open Discovery (§7).
 - **Date:** 2026-10-22
-- **Scope:** `AMQPConnectorforMCP` (this package, `amqp-mcp-transport`). It also covers the AMQP
-  transport embedded in `mcp_open_discovery_3_0` (`src/transports/amqp/`) and how
-  `AMQPConnectorforMCPEdge` (`@nagual69/amqp-mcp-edge`) fits in.
+- **Scope:** `amqp-mcp-transport` (this package). It also covers the AMQP
+  transport embedded in MCP Open Discovery (`src/transports/amqp/`) and how
+  [amqp-mcp-edge](https://github.com/VibeForge-Systems/amqp-mcp-edge) fits in.
 - **Inputs:**
-  - A Grok conversation summarising the 2026-07-28 changes. It was treated as unverified, and every
+  - An AI-generated summary of the 2026-07-28 changes. It was treated as unverified, and every
     claim was re-checked against primary sources (§2.2).
   - The MCP 2026-07-28 specification pages.
   - The OASIS AMQP TC CSD01 drafts.
@@ -46,7 +51,7 @@ re-architecture should:
 - This is a **P0 hotfix (Phase 0)**, independent of the spec work.
 - **Status:** fixed in `amqp-mcp-transport@1.2.0`, which ports Open Discovery's whole AMQP transport into this package (see CHANGELOG).
 
-**The main point of disagreement with the Grok analysis:** it is right about the direction but
+**The main point of disagreement with that summary:** it is right about the direction but
 wrong about where the work is.
 
 - The SDK v2 `Transport` interface did *not* get meaningfully simpler. It still has `sessionId`
@@ -100,9 +105,9 @@ Two inconsistencies in the spec itself affect us:
 - **Server Cards (SEP-2127)** are an *Extensions Track* item, not core 2026-07-28. They are
   out of scope here.
 
-### 2.2 Where the Grok analysis was wrong or incomplete
+### 2.2 Where that summary was wrong or incomplete
 
-| Grok claim | Verified position |
+| The summary claimed | Verified position |
 |---|---|
 | "Transport surface is still pluggable but simpler and request-oriented" | **Wrong in substance.** The v2 `Transport` (`@modelcontextprotocol/server` 2.3.1) still has `start/send/close`, `sessionId?` and `setProtocolVersion?`, and adds `setSupportedProtocolVersions?`, `hasPerRequestStream?`, and `requestSignal` / `onRequestStreamEnd` / `headers` on `TransportSendOptions`. The real change is the serving entries: `createMcpHandler(factory)` builds a fresh server per HTTP request; `serveStdio(factory, {transport})` pins one per connection. `ServerEventBus` is the seam for multi-process subscriptions. |
 | Implied: v2 speaks 2026-07-28 by default | **Wrong.** Core `LATEST_PROTOCOL_VERSION` is still `"2025-11-25"`. The client's `versionNegotiation` defaults to `'legacy'`; `'auto'` probes with `server/discover`. A v2 client over AMQP is a 2025-era client unless configured otherwise. |
@@ -111,7 +116,7 @@ Two inconsistencies in the spec itself affect us:
 | "correlationId + replyTo … still perfect. Keep." | **Needs a wire change.** OASIS correlates on the requester's **`message-id`**, which the responder echoes as `correlation-id` "unaltered in type or representation". Requests carry no `correlation-id`. Our v1 clients put a client-chosen `correlationId` on the request. The server accepts both during the transition (§5.9). |
 | "Drop or greatly reduce sticky/session tracking" | **Dangerous if read literally.** The in-process mapping from (reply address, request id) to the in-flight exchange must stay. Deleting "session tracking" is exactly the half-migration Open Discovery's `AMQP_SESSION_MODEL.md` §2 warns about. Under per-request server instances the body-id collision goes away *inside the SDK*, but the transport's own in-flight table must never be keyed by the body `id`. |
 | "Amazon MQ mcp-amqp-transport reference implementation" | **Misleading.** `@aws/mcp-amqp-transport` 1.0.2 is beta, published 2025-11-01, peers on SDK v1, targets the 2025 protocol and **rewrites JSON-RPC ids on the wire**. That violates OASIS §6.1 (body unchanged). Useful prior art for 0-9.1/1.0 dual support; not an interop target. |
-| Cancellation "e.g., cancel notification or TTL + explicit cancel message" | **Under-specified.** OASIS §8 makes `notifications/cancelled` on timeout a client **MUST**. In SDK v2, `hasPerRequestStream` must stay unset or `false` for AMQP, otherwise the protocol layer suppresses `notifications/cancelled`. With competing consumers the cancel can land on the wrong instance; OASIS lists cancellation affinity as an open question. Grok did not mention this. |
+| Cancellation "e.g., cancel notification or TTL + explicit cancel message" | **Under-specified.** OASIS §8 makes `notifications/cancelled` on timeout a client **MUST**. In SDK v2, `hasPerRequestStream` must stay unset or `false` for AMQP, otherwise the protocol layer suppresses `notifications/cancelled`. With competing consumers the cancel can land on the wrong instance; OASIS lists cancellation affinity as an open question. The summary did not mention this. |
 | Not mentioned | Per-request `logLevel` with a MUST-NOT on unsolicited log messages; `requestState` integrity across a pool; mandatory `resultType`; `-32021` / `-32022`; resource-not-found renumbering; `ping` removal; the subscription-teardown inconsistency above. |
 
 ---
@@ -122,9 +127,9 @@ Two inconsistencies in the spec itself affect us:
 
 | Codebase | What it is | 2026-07-28 posture |
 |---|---|---|
-| `AMQPConnectorforMCP` (this repo) | Published `amqp-mcp-transport` 1.0.0. Client + server `Transport` on `@modelcontextprotocol/sdk ^1.0.0` and `amqplib`. | README claims "fully compliant with 2025-11-25". Several of its defects (§3.2) predate the spec change. |
-| `mcp_open_discovery_3_0/src/transports/amqp/` | A diverged, materially more correct fork: id rewrite, notification namespace split, broker-cancel handling, adapter-level recovery. Pinned by `test_amqp_extension_contract.js`. | Ratified 2026-08-19 as an "extension transport" with its own semantics (`docs/AMQP_SESSION_MODEL.md` §6). SDK pinned at v1 1.32.1. |
-| `AMQPConnectorforMCPEdge` | `@nagual69/amqp-mcp-edge` 0.1.0. Versioned job / ack / progress / result envelopes, a DLX-backed job consumer, an event publisher with drain-wait backpressure. Explicitly *not* an MCP transport. | Orthogonal to the core spec. It is the natural execution backend for the Tasks extension (§5.10). |
+| `amqp-mcp-transport` (this repo) | Published `amqp-mcp-transport` 1.0.0. Client + server `Transport` on `@modelcontextprotocol/sdk ^1.0.0` and `amqplib`. | README claims "fully compliant with 2025-11-25". Several of its defects (§3.2) predate the spec change. |
+| MCP Open Discovery's `src/transports/amqp/` | A diverged, materially more correct fork: id rewrite, notification namespace split, broker-cancel handling, adapter-level recovery. Pinned by `test_amqp_extension_contract.js`. | Ratified 2026-08-19 as an "extension transport" with its own semantics (`docs/AMQP_SESSION_MODEL.md` §6). SDK pinned at v1 1.32.1. |
+| `amqp-mcp-edge` | `amqp-mcp-edge` 0.1.0. Versioned job / ack / progress / result envelopes, a DLX-backed job consumer, an event publisher with drain-wait backpressure. Explicitly *not* an MCP transport. | Orthogonal to the core spec. It is the natural execution backend for the Tasks extension (§5.10). |
 
 Two forks that disagree on a security-relevant invariant is a worse risk than any single defect
 below. Consolidating them is part of this plan.
@@ -207,7 +212,7 @@ flowchart TB
     C["v2 Client (versionNegotiation: 'auto')"]
   end
 
-  subgraph PKG["@nagual69/amqp-mcp-transport v2"]
+  subgraph PKG["@vibeforge-systems/amqp-mcp-transport v2"]
     direction TB
     SE["serveAmqp(factory, opts)<br/>serving entry: era classification,<br/>in-flight table, deadlines, ack policy"]
     CT["AmqpClientTransport<br/>(v2 Transport; hasPerRequestStream unset)"]
@@ -546,7 +551,7 @@ The Tasks extension needs three things AMQP is good at, and one it is not:
   - A single-instance OD can use them.
   - A pool needs Postgres or an equivalent (see R-OD below).
 
-The convergence with `@nagual69/amqp-mcp-edge`:
+The convergence with `amqp-mcp-edge`:
 
 | Tasks extension | Edge contract (exists today) |
 |---|---|
@@ -579,7 +584,7 @@ job delivery safe. That is the property §5.7 could only approximate for synchro
 ## 6. Package and repository shape
 
 - **Package.**
-  - Rename to `@nagual69/amqp-mcp-transport@2.0.0`, matching the Edge scope.
+  - Rename the package, matching the Edge scope (D-6; decided as `@vibeforge-systems/amqp-mcp-transport`).
   - Keep a final `amqp-mcp-transport@1.0.x` line for the hotfix and a deprecation notice.
   - Fix `author` and the license header. This package is Apache-2.0, Edge is MIT; decide whether to
     align (§10).
@@ -602,7 +607,7 @@ job delivery safe. That is the property §5.7 could only approximate for synchro
 
 ## 7. Impact on Open Discovery's ratified contract
 
-Clause by clause against `mcp_open_discovery_3_0/docs/AMQP_SESSION_MODEL.md` §6. Changing a
+Clause by clause against MCP Open Discovery's `docs/AMQP_SESSION_MODEL.md` §6. Changing a
 ratified clause needs a superseding ADR in that repo, ratified by the maintainer. This plan
 proposes the ADR; it does not edit that document.
 
@@ -660,7 +665,7 @@ Effort is relative sizing (S < M < L) for a single maintainer. It is not a calen
 
 | Phase | Content | Exit criteria | Size |
 |---|---|---|---|
-| **0 — Consolidate into this package** | **Done in 1.2.0.** OD's transport, recovery runtime and contract pins are ported here (D1, D2, D8 fixed). Packaging is fixed so `npm install github:nagual69/AMQPConnectorforMCP#v1.2.0` builds. The false compliance claims are removed. | P1 (single-instance form) passes; README states the 2025-era scope honestly | S |
+| **0 — Consolidate into this package** | **Done in 1.2.0.** OD's transport, recovery runtime and contract pins are ported here (D1, D2, D8 fixed). Packaging is fixed so `npm install github:VibeForge-Systems/amqp-mcp-transport#v1.2.0` builds. The false compliance claims are removed. | P1 (single-instance form) passes; README states the 2025-era scope honestly | S |
 | **0b — OD consumes the package** | OD replaces `src/transports/amqp/` with a git dependency on this package and keeps `startAmqpTransport` as a thin wrapper. It re-points its AMQP suites at the package. `test_amqp_extension_contract.js` reads the transport source and OD's contract doc by path, so those pins move to this repo's `contract.test.ts` (already ported). | OD's AMQP suites green against the package; no embedded fork remains | S–M |
 | **0b — OASIS review (deadline 18 Nov 2026 23:59 UTC)** | Submit the §11 comments through the OASIS comment facility (not GitHub). | Comments filed | S |
 | **1 — Binding document + ADR** | `docs/BINDING.md` (normative; 0-9.1 profile plus mapping to OASIS 1.0). Superseding ADR drafted in OD for §6.1 / §6.4 / §6.6. | Maintainer ratifies the ADR (decision D-1) | M |
@@ -685,7 +690,7 @@ Sequencing rationale:
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
 | D-1 | Supersede OD contract §6.1 / §6.4 / §6.6 | Ratify the superseding ADR / keep Option 3 as-is and confine v2 to non-OD users | **Ratified 2026-10-28** (Open Discovery `docs/adr/ADR-amqp-2026-07-28-contract.md`). Keeping §6.4 would have made OD's AMQP path non-conformant for every 2026-era client. Keeping §6.1 would have forfeited AMQP's main advantage. D-8 (single instance) was ratified with it. |
-| D-2 | Serving engine | A / B→C / C directly | **B → C.** The Phase 2 spike passed every gate on SDK 2.4.0 on 2026-10-28 ([report](./spikes/phase2-2026-10-28/README.md)). 2.4.0's `classifyInboundRequest` does not make C viable yet, because the listen router and modern-only setup are still module-private. |
+| D-2 | Serving engine | A / B→C / C directly | **B → C.** The Phase 2 spike passed every gate on SDK 2.4.0 on 2026-10-28 ([report](./spike-phase2-2026-10-28/README.md)). 2.4.0's `classifyInboundRequest` does not make C viable yet, because the listen router and modern-only setup are still module-private. |
 | D-3 | Per-request factory budget for OD | e.g. p99 ≤ 5 ms / ≤ 20 ms / measure first | **Measured 2026-10-28:** an 81-tool factory plus `fetch` takes 0.46 ms at p50 and 6.0 ms at p99, with the GC tail included. **Proposed:** bridge overhead p99 ≤ 10 ms, excluding tool work, re-measured with OD's real plugins in Phase 3. The maintainer's call. |
 | D-4 | AMQP 1.0 priority | Phase 5 as planned / pull forward / never | **As planned.** RabbitMQ is the production broker; 1.0 matters for standard conformance and non-RabbitMQ brokers, not for OD today. |
 | D-5 | Legacy-era retention | Until v3.0 / fixed date / until the VS Code bridge migrates | Until the VS Code bridge and any other known v1 client migrate, and no earlier than v3.0 |
@@ -782,7 +787,7 @@ The 0-9.1 profile belongs in this package's own `BINDING.md`.
   `Transport`, `TransportSendOptions`, `createMcpHandler`, `serveStdio`, `ServerEventBus`,
   `McpServerFactory`, `createRequestStateCodec`, and `Mcp-Param-*` enforcement.
 - `@aws/mcp-amqp-transport` 1.0.2 and `github.com/amazon-mq/mcp-amqp-transport` (prior art only).
-- `mcp_open_discovery_3_0`: `docs/AMQP_SESSION_MODEL.md`, `docs/TRANSPORT_ARCHITECTURE.md`,
+- MCP Open Discovery: `docs/AMQP_SESSION_MODEL.md`, `docs/TRANSPORT_ARCHITECTURE.md`,
   `src/transports/amqp/amqp-server-transport.ts`, `testing/test_amqp_extension_contract.js`.
-- `AMQPConnectorforMCPEdge`: `src/contracts/*`, `src/consumer/edge-job-consumer.ts`,
+- `amqp-mcp-edge`: `src/contracts/*`, `src/consumer/edge-job-consumer.ts`,
   `src/publisher/edge-event-publisher.ts`.

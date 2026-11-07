@@ -1,219 +1,225 @@
-# Getting Started with AMQP MCP Transport
+# Getting started
 
-## Compliance
-
-This transport targets the 2025-era MCP protocol (SDK v1). All messages are sent as raw JSON-RPC 2.0 on the wire, with transport metadata (correlationId, replyTo, contentType) in AMQP message properties. No custom envelope wrapping is used. See [TRANSPORT_CONTRACT.md](./TRANSPORT_CONTRACT.md) for the normative wire behaviour.
-
-## Installation
-
-### npm
-
-The package is not published to npm yet; install from GitHub (the `prepare` script builds it):
-
-```bash
-npm install github:VibeForge-Systems/amqp-mcp-transport#v1.2.0 @modelcontextprotocol/sdk amqplib
-```
-
-### yarn
-
-```bash
-yarn add amqp-mcp-transport @modelcontextprotocol/sdk amqplib
-```
-
-### pnpm
-
-```bash
-pnpm add amqp-mcp-transport @modelcontextprotocol/sdk amqplib
-```
+This guide takes an MCP server and client from nothing to talking through RabbitMQ, then covers
+what a deployment needs: names, recovery, timeouts, TLS and logging. It describes 1.x, which serves
+the 2025-era protocol through `@modelcontextprotocol/sdk` v1. Every option and default is in
+[api-reference.md](./api-reference.md).
 
 ## Prerequisites
 
-- Node.js 18 or higher
-- An AMQP broker (RabbitMQ, ActiveMQ, Apache Qpid, etc.)
-- TypeScript 5.0+ (for TypeScript projects)
+- Node 18 or later.
+- `@modelcontextprotocol/sdk` 1.17.1 or later, below 2. It is a peer dependency, so your
+  application installs it.
+- RabbitMQ. The examples run against 3.12 and 4.4. Other AMQP 0-9.1 brokers are untested.
 
-## Basic Usage
-
-### Setting up an AMQP Broker
-
-For development, you can quickly start a RabbitMQ instance using Docker:
+## Install
 
 ```bash
-docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
+npm install @vibeforge-systems/amqp-mcp-transport @modelcontextprotocol/sdk
 ```
 
-This will start RabbitMQ with:
+The npm package is published from the next release on. Until then, install from GitHub:
 
-- AMQP port: 5672
-- Management UI: http://localhost:15672 (guest/guest)
+```bash
+npm install github:VibeForge-Systems/amqp-mcp-transport
+```
 
-### Client Transport Example
+The `prepare` script builds it on install. The package is ESM. CommonJS code on Node 22.12 or
+later can `require()` it.
 
-```typescript
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { AMQPClientTransport } from "amqp-mcp-transport";
+## Start a broker
 
-const transport = new AMQPClientTransport({
-  amqpUrl: "amqp://localhost:5672",
-  exchangeName: "mcp.notifications",
-  serverQueuePrefix: "mcp.server",
-  responseTimeout: 30000,
-});
+The repository's `docker-compose.yml` runs RabbitMQ 3.12 with the management UI:
 
-const client = new Client(
-  { name: "example", version: "1.0.0" },
-  { capabilities: {} }
+```bash
+docker compose up -d
+export AMQP_URL=amqp://admin:admin123@localhost:5672
+```
+
+The management UI is at <http://localhost:15672>. The compose login is a placeholder: change
+`RABBITMQ_DEFAULT_USER` and `RABBITMQ_DEFAULT_PASS` before the broker is reachable from a network
+you do not control.
+
+## Server
+
+```ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { AMQPServerTransport } from "@vibeforge-systems/amqp-mcp-transport";
+import { z } from "zod";
+
+const server = new McpServer({ name: "echo-server", version: "1.0.0" });
+server.registerTool(
+  "echo",
+  { description: "Echo the input back", inputSchema: { text: z.string() } },
+  async ({ text }) => ({ content: [{ type: "text", text }] }),
 );
 
-// Connect: the SDK will call transport.start() internally
+const transport = new AMQPServerTransport({
+  amqpUrl: process.env.AMQP_URL!,
+  exchangeName: "mcp.examples",
+  queuePrefix: "mcp.example",
+});
+
+await server.connect(transport); // the SDK calls transport.start(); do not call it yourself
+```
+
+`server.connect()` rejects if the broker is unreachable. The low-level `Server` class from
+`@modelcontextprotocol/sdk/server/index.js` works the same way; `examples/server.ts` uses it.
+
+## Client
+
+```ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { AMQPClientTransport } from "@vibeforge-systems/amqp-mcp-transport";
+
+const transport = new AMQPClientTransport({
+  amqpUrl: process.env.AMQP_URL!,
+  exchangeName: "mcp.examples",   // must match the server's
+  serverQueuePrefix: "mcp.example",
+});
+
+const client = new Client({ name: "echo-client", version: "1.0.0" });
 await client.connect(transport);
 
-// Use the MCP client API
-const tools = await client.listTools();
-console.log("Tools:", tools.tools);
-
+const result = await client.callTool({ name: "echo", arguments: { text: "hello" } });
 await client.close();
 ```
 
-### Server Transport Example
+`Client.connect()` does not send `initialize` over this transport, so `getServerCapabilities()`
+and `getServerVersion()` return `undefined`. Calls work regardless. The README's
+[What 1.x does not do](../README.md#what-1x-does-not-do) explains why.
 
-```typescript
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { AMQPServerTransport } from "amqp-mcp-transport";
+## Names
 
-const transport = new AMQPServerTransport({
-  amqpUrl: "amqp://localhost:5672",
-  exchangeName: "mcp.notifications",
-  queuePrefix: "mcp.server",
-});
+| Option | Side | What it does |
+| --- | --- | --- |
+| `exchangeName` | both | Both sides use the topic exchange `${exchangeName}.mcp.routing`. Client and server find each other through it alone. |
+| `queuePrefix` | server | The server consumes from `${queuePrefix}.requests.<uuid>`, a new exclusive queue per transport. |
+| `serverQueuePrefix` | client | Required, but 1.x does not route by it. |
 
-const server = new Server(
-  { name: "example-server", version: "1.0.0" },
-  { capabilities: { tools: {}, resources: {}, prompts: {} } }
+Give each server its own `exchangeName`. Every server bound to an exchange receives every request
+on it, so two servers on one exchange would both answer.
+
+## Keep a server up
+
+The transport reconnects by itself: by default every 5 seconds, up to 10 times, keeping its queue
+name. After that it closes for good. `AmqpServerRuntime` takes over from there. It builds a new
+transport and a new server from your factory, and retries with exponential backoff until it
+connects.
+
+```ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { AmqpServerRuntime } from "@vibeforge-systems/amqp-mcp-transport";
+
+const runtime = new AmqpServerRuntime<McpServer>({ logger: myLogger });
+
+const result = await runtime.start(
+  {
+    create: async () => buildServer(),         // a new McpServer on every attach
+    release: (server) => forget(server),       // optional: the server's transport has gone
+  },
+  {
+    enabled: true,
+    url: process.env.AMQP_URL!,
+    exchange: "mcp.examples",
+    queuePrefix: "mcp.example",
+    recoveryRetryInterval: 30_000,             // these four are the defaults
+    recoveryBackoffMultiplier: 1.5,
+    recoveryMaxRetryInterval: 300_000,
+    recoveryMaxRetries: -1,                    // -1 retries forever
+  },
 );
-
-// Define handlers with the MCP SDK schemas (omitted for brevity)
-
-// Connect: the SDK will call transport.start() internally
-await server.connect(transport);
-console.log("Server started over AMQP");
 ```
 
-## Configuration
+- **`start()` does not throw when the broker is down.** It returns `{ started: false, error }` and
+  keeps retrying in the background, unless `autoRecoveryEnabled` is `false`.
+- **`create()` must return a new server each time.** Register your tools, resources and prompts
+  inside it. A server is never reused across attaches.
+- **`getStatus()` is what a health endpoint needs.** It reports `connected`, the exchange and
+  queue prefix, the last error, and the recovery loop's state, retry count and next retry time.
+- **`stop()` cancels recovery and closes the transport.** Call it on shutdown.
+- **`send()` publishes a server notification** through whichever transport is current, such as
+  `notifications/tools/list_changed`. It accepts notifications only.
 
-### Basic Configuration
+A request in flight when the transport is rebuilt is never answered. Clients own timeout and
+retry.
 
-```typescript
-import type { AMQPClientTransportOptions } from "amqp-mcp-transport";
+## Timeouts
 
-const config: AMQPClientTransportOptions = {
-  amqpUrl: "amqp://localhost:5672",
-  exchangeName: "mcp.notifications",
-  serverQueuePrefix: "mcp.server",
-};
+A client call fails on the SDK's request timeout: 60 seconds by default. Set it per call:
+
+```ts
+await client.callTool({ name: "echo", arguments: { text: "hi" } }, undefined, { timeout: 10_000 });
 ```
 
-### Advanced Configuration
+The transport's `responseTimeout` (default 30 seconds) is separate. When it expires, the transport
+stops tracking the request and reports it through `onerror`, but the call itself still waits for
+the SDK timeout. A response that arrives after `responseTimeout` is still delivered.
 
-```typescript
-import type { AMQPClientTransportOptions } from "amqp-mcp-transport";
+## TLS, virtual hosts and heartbeats
 
-const advancedConfig: AMQPClientTransportOptions = {
-  amqpUrl: "amqp://user:pass@broker.example.com:5672/vhost",
-  exchangeName: "mcp.notifications",
-  serverQueuePrefix: "mcp.server",
-  responseTimeout: 30000,
-  prefetchCount: 10,
-  reconnectDelay: 5000,
-  maxReconnectAttempts: 10,
-};
+The transport passes `amqpUrl` to `amqplib.connect()` unchanged, so everything is set in the URL:
+
+```text
+amqps://user:password@broker.example.com:5671/my-vhost?heartbeat=30
 ```
 
-## Error Handling
+- **`amqps://`** connects with TLS and verifies the broker against Node's default CA bundle. For a
+  private CA, set `NODE_EXTRA_CA_CERTS=/path/to/ca.pem` in the process environment.
+- **Client certificates are not supported.** The transport passes no socket options to
+  `amqplib`, so mutual TLS is out of reach in 1.x. Authenticate with a username and password.
+- **The path is the virtual host.** Percent-encode it: `/` as the vhost is `%2F`.
+- **`heartbeat`**, `frameMax` and `channelMax` are query parameters. Without `heartbeat`, the
+  broker's value applies.
 
-```typescript
-import { AMQPClientTransport } from "amqp-mcp-transport";
+Percent-encode any reserved characters in the username or password.
 
-const client = new AMQPClientTransport(config);
+## Logging
 
-try {
-  await client.connect();
+Both transports and the runtime accept a `logger` with `debug`, `info`, `warn` and `error`
+methods. The default writes warnings and errors to stderr and drops the rest.
 
-  const response = await client.send({
-    jsonrpc: "2.0",
-    id: 1,
-    method: "tools/list",
-    params: {},
-  });
-} catch (error) {
-  if (error.code === "ECONNREFUSED") {
-    console.error("Failed to connect to AMQP broker");
-  } else if (error.code === "REQUEST_TIMEOUT") {
-    console.error("Request timed out");
-  } else {
-    console.error("Unexpected error:", error);
-  }
-} finally {
-  await client.close();
-}
+```ts
+const transport = new AMQPServerTransport({
+  amqpUrl: process.env.AMQP_URL!,
+  exchangeName: "mcp.examples",
+  queuePrefix: "mcp.example",
+  logger: {
+    debug: (msg, ctx) => log.debug(ctx, msg),
+    info: (msg, ctx) => log.info(ctx, msg),
+    warn: (msg, ctx) => log.warn(ctx, msg),
+    error: (msg, ctx) => log.error(ctx, msg),
+  },
+});
 ```
 
-## Environment Variables
+Errors that concern a message or the connection also go to the transport's `onerror`. On
+`connect()`, the SDK keeps any `onerror` you set on the transport and forwards every error to the
+`onerror` of your `Client` or `Server` as well, so set either one to see them.
 
-You can configure the transport using environment variables:
+## Custom routing keys
+
+`routingKeyStrategy` replaces the default `mcp.<namespace>.<method>` key:
+
+```ts
+routingKeyStrategy: (message, routingType) => {
+  const method = "method" in message ? message.method.replace(/\//g, ".") : "unknown";
+  return `mcp.${routingType}.myapp.${method}`;
+},
+```
+
+Each key must stay inside its namespace: `mcp.request.#`, `mcp.client-notification.#` or
+`mcp.server-notification.#`, as `routingType` says. A key outside those patterns matches no queue,
+and the broker drops the message.
+
+## Run the examples
+
+From a clone of the repository, with the broker above running:
 
 ```bash
-# .env file
-AMQP_URL=amqp://localhost:5672
-AMQP_EXCHANGE=mcp.notifications
-AMQP_QUEUE_PREFIX=mcp.server
-AMQP_RESPONSE_TIMEOUT=30000
+npm run example:server       # terminal 1
+npm run example:client       # terminal 2
 ```
 
-```typescript
-import { AMQPClientTransport } from "amqp-mcp-transport";
-
-const client = new AMQPClientTransport({
-  amqpUrl: process.env.AMQP_URL || "amqp://localhost:5672",
-  exchangeName: process.env.AMQP_EXCHANGE || "mcp.notifications",
-  serverQueuePrefix: process.env.AMQP_QUEUE_PREFIX || "mcp.server",
-  responseTimeout: parseInt(process.env.AMQP_RESPONSE_TIMEOUT || "30000"),
-});
-```
-
-## Docker Compose Setup
-
-For a complete development environment:
-
-```yaml
-# docker-compose.dev.yml
-version: "3.8"
-services:
-  rabbitmq:
-    image: rabbitmq:3-management
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    environment:
-      RABBITMQ_DEFAULT_USER: dev
-      RABBITMQ_DEFAULT_PASS: dev123
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-
-  app:
-    build: .
-    environment:
-      AMQP_URL: amqp://dev:dev123@rabbitmq:5672
-    depends_on:
-      - rabbitmq
-
-volumes:
-  rabbitmq_data:
-```
-
-## Next Steps
-
-- [API Reference](./api-reference.md) - Detailed API documentation
-- [Configuration Guide](./configuration.md) - Complete configuration options
-- [Examples](./examples.md) - More complex usage examples
-- [Troubleshooting](./troubleshooting.md) - Common issues and solutions
+Both read `AMQP_URL`, and `AMQP_EXCHANGE` if set (default `mcp.examples`). The client lists the
+server's tools, resources and prompts, calls a tool and reads a resource.

@@ -3,7 +3,7 @@
 - **Status:** Draft, design ratified. It becomes normative for this package when two things are
   true:
   - the maintainer ratifies decision D-1 of
-    [REARCHITECTURE_PLAN_2026-07-28.md](./REARCHITECTURE_PLAN_2026-07-28.md). **Done 2026-10-28**,
+    [REARCHITECTURE_PLAN_2026-07-28.md](./history/REARCHITECTURE_PLAN_2026-07-28.md). **Done 2026-10-28**,
     through Open Discovery's `docs/adr/ADR-amqp-2026-07-28-contract.md`;
   - v2.0.0 implements it.
 
@@ -37,7 +37,7 @@ It does not define:
 
 - the MCP protocol itself;
 - broker authentication mechanisms, beyond requiring one (§9);
-- the Tasks extension's job transport. That is `@nagual69/amqp-mcp-edge`'s envelope contract, and
+- the Tasks extension's job transport. That is [amqp-mcp-edge](https://github.com/VibeForge-Systems/amqp-mcp-edge)'s envelope contract, and
   a later revision maps it here (plan §5.10).
 
 Where this document and the OASIS drafts overlap, the OASIS text is the reference, and §12
@@ -436,7 +436,7 @@ same across the pool (§4.1 rule 6).
 3. **Direct reply-to.** RabbitMQ 4.4.0 **silently discards** a `mandatory` publish to a stale
    `amq.rabbitmq.reply-to` address. The publish is confirmed with no `basic.return`, whether the
    client closed its channel or its connection (O-2, measured 2026-10-28; see
-   [the Phase 2 spike](./spikes/phase2-2026-10-28/README.md) §5). A server therefore cannot learn
+   [the Phase 2 spike](./history/spike-phase2-2026-10-28/README.md) §5). A server therefore cannot learn
    that a direct-reply-to client has gone. So:
    - a client **SHOULD** use a named exclusive reply queue for `subscriptions/listen`, where a
      return is certain; a listen stream on direct reply-to lives until its lifetime bound;

@@ -1,137 +1,58 @@
-# Contributing to AMQP MCP Transport
+# Contributing
 
-We welcome contributions to the AMQP MCP Transport project! This document provides guidelines for contributing.
+Thanks for helping. Bug reports, fixes, documentation and review of the draft 2.x binding are all
+welcome. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Report security
+problems privately, as [SECURITY.md](SECURITY.md) describes, never in a public issue.
 
-## Development Setup
+## Set up
 
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/your-org/AMQPConnectorforMCP.git
-   cd AMQPConnectorforMCP
-   ```
-
-2. **Install dependencies**
-
-   ```bash
-   npm install
-   ```
-
-3. **Build the project**
-
-   ```bash
-   npm run build
-   ```
-
-4. **Run tests**
-
-   ```bash
-   npm test
-   ```
-
-5. **Start development environment**
-
-   ```bash
-   # Start RabbitMQ for testing
-   docker-compose up -d
-
-   # Run in watch mode
-   npm run dev
-   ```
-
-## Project Structure
-
-```
-├── src/
-│   ├── index.ts                    # Main entry point
-│   └── transports/
-│       ├── amqp-client-transport.ts # AMQP client transport
-│       ├── amqp-server-transport.ts # AMQP server transport
-│       ├── amqp-utils.ts           # Utility functions
-│       ├── types.ts                # Type definitions
-│       ├── index.ts                # Transport exports
-│       └── deprecated/             # Legacy implementations
-├── examples/                       # Usage examples
-├── dist/                          # Compiled output (gitignored)
-└── docs/                          # Documentation
+```bash
+git clone https://github.com/VibeForge-Systems/amqp-mcp-transport
+cd amqp-mcp-transport
+npm install          # also builds dist/, via the prepare script
 ```
 
-## Code Style
+Node 18 or later. The tests need no broker: they inject a fake connection. To run the examples
+against a real broker, start one with `docker compose up -d`, as the
+[README](README.md#quick-start) shows.
 
-- Use TypeScript for all source code
-- Follow the existing ESLint configuration
-- Write comprehensive JSDoc comments
-- Use meaningful variable and function names
-- Keep functions focused and testable
+## Before you open a pull request
 
-## Testing
+Run what CI runs:
 
-- Write unit tests for new features
-- Ensure all tests pass before submitting PR
-- Aim for good test coverage
-- Test both success and error scenarios
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run build:examples
+```
 
-## Pull Request Process
+CI runs the same checks, the tests on Node 18, 20 and 22.
 
-1. **Fork** the repository
-2. **Create** a feature branch from `main`
-3. **Make** your changes
-4. **Add** tests for new functionality
-5. **Ensure** all tests pass and code builds
-6. **Update** documentation if needed
-7. **Submit** a pull request
+## What a change needs
 
-## Pull Request Guidelines
+- **A test.** A bug fix comes with a test that fails without it.
+- **Contract changes come with the contract.** [docs/TRANSPORT_CONTRACT.md](docs/TRANSPORT_CONTRACT.md)
+  is normative for 1.x, and `src/transports/__tests__/contract.test.ts` pins each clause by
+  number. A change to wire behaviour updates both in the same pull request.
+- **Binding changes start as an issue.** [docs/BINDING.md](docs/BINDING.md) is the design 2.0.0 is
+  built against. Propose a change to it in an issue before you write code for it.
+- **A CHANGELOG entry** under `[Unreleased]`, for anything a user of the package would notice.
+- **Strict TypeScript, and the existing ESLint config.** No new runtime dependencies without
+  discussion first.
 
-- Use descriptive commit messages
-- Reference issue numbers when applicable
-- Keep PRs focused and reasonably sized
-- Include tests for new features
-- Update documentation for API changes
+## Layout
 
-## Issues
+```text
+src/transports/   the 1.x client and server transports, AmqpServerRuntime and utilities
+src/binding/      binding-core, exported as /binding
+examples/         the client and server behind npm run example:*
+docs/             the guides, the contract and the binding; docs/history/ holds dated records
+```
 
-When reporting issues:
+## Pull requests
 
-- Use a clear, descriptive title
-- Provide reproduction steps
-- Include environment details
-- Add relevant logs or error messages
-
-## Development Guidelines
-
-### Transport Implementation
-
-- Follow the MCP Transport interface exactly
-- Ensure proper error handling and cleanup
-- Support all MCP message types (request, response, notification)
-- Maintain session tracking and correlation
-
-### AMQP Best Practices
-
-- Use appropriate exchange types and routing
-- Handle connection failures gracefully
-- Implement proper message acknowledgment
-- Support message persistence when needed
-
-### TypeScript Guidelines
-
-- Use strict type checking
-- Avoid `any` types when possible
-- Export proper type definitions
-- Follow naming conventions
-
-## Release Process
-
-1. Update version in `package.json`
-2. Update `CHANGELOG.md`
-3. Create git tag
-4. Publish to npm (maintainers only)
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the Apache License, Version 2.0.
-
-## Questions?
-
-Feel free to open an issue for questions or discussions about contributing.
+Branch from `main` and keep each pull request to one change. Say what it changes, why, and how you
+tested it. By contributing, you agree that your contribution is licensed under the
+[Apache License 2.0](LICENSE).
