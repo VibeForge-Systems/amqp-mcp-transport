@@ -30,19 +30,28 @@ The SDK calls `transport.start()`, so broker errors surface from `client.connect
 | TLS errors such as `self-signed certificate` | The broker's certificate does not chain to a trusted CA. Set `NODE_EXTRA_CA_CERTS`. A TLS handshake against a plain `amqp` port fails too. |
 | `Invalid AMQP server transport configuration` | Thrown by the server constructor: a URL scheme other than `amqp:` or `amqps:`, `reconnectDelay` under 1000, or `maxReconnectAttempts` or `prefetchCount` under 1. Under `AmqpServerRuntime` it arrives in `start()`'s `result.error` instead, and recovery retries it forever. |
 
-## Calls hang, then fail with `MCP error -32001: Request timed out`
+## Calls fail at once with `No MCP server is bound to exchange '…'`
 
-The SDK gave up after its request timeout, 60 seconds unless you passed `timeout`. No response
-came back. In order of likelihood:
+The error is `MCP error -32000`, with `data.reason` `"no-route"`. No queue was bound for the
+request's routing key, so the broker returned the request. Either:
 
 1. **No server is bound to the exchange.** The two sides use different `exchangeName` values, or
-   the server is not running. The broker drops a request no queue binds. Check the bindings above.
-2. **A custom `routingKeyStrategy` left its namespace.** A request key that does not start with
-   `mcp.request.` matches no queue.
-3. **The server went away mid-request,** or its transport was rebuilt. In-flight requests are
+   the server is not running. `data.exchange` names the exchange the client used. Check the
+   bindings above.
+2. **A custom `routingKeyStrategy` left its namespace.** `data.routingKey` shows the key. A request
+   key must start with `mcp.request.`. The transport also logs a warning the first time.
+
+## Calls hang, then fail with `MCP error -32001: Request timed out`
+
+The SDK gave up after its request timeout, 60 seconds unless you passed `timeout`. The request
+reached a server, but no response came back:
+
+1. **The server went away mid-request,** or its transport was rebuilt. In-flight requests are
    never answered. Retry.
-4. **The tool is slower than the timeout.** Pass a larger `timeout` to the call. The server does
+2. **The tool is slower than the timeout.** Pass a larger `timeout` to the call. The server does
    not act on the SDK's cancellation, so the tool still runs to completion.
+3. **The response was dropped.** A response over the client's `maxMessageSize` is discarded. See
+   below.
 
 ## `Request timeout after 30000ms` in `onerror`, but the call succeeds
 

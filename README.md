@@ -192,8 +192,9 @@ All traffic goes through one durable topic exchange, `${exchangeName}.mcp.routin
   not JSON, or one that is not valid JSON-RPC is dropped and reported through `onerror`. The
   server rejects it without requeue. The client acknowledges it and discards it.
 - **`routingKeyStrategy` can change the suffix.** It must keep each message inside its namespace,
-  and nothing enforces that. A key outside the patterns above matches no queue, so the broker
-  drops the message.
+  and nothing enforces that. A key outside the patterns above matches no queue. The broker returns
+  such a request, which then fails at once, and drops such a notification. Each transport logs a
+  warning the first time its strategy leaves a namespace.
 
 [docs/TRANSPORT_CONTRACT.md](docs/TRANSPORT_CONTRACT.md) is the normative statement of all of this.
 `src/transports/__tests__/contract.test.ts` pins each clause by number.
@@ -219,11 +220,12 @@ All traffic goes through one durable topic exchange, `${exchangeName}.mcp.routin
 - **Cancellation does not reach the server.** When a call times out or is aborted, the SDK client
   sends `notifications/cancelled`. The server transport rewrites request ids but not the id inside
   a cancellation, so the server never matches it, and the tool runs to completion.
-- **No delivery guarantee.** The endpoint queue is not durable. A request in flight when the
-  server goes away is not answered, and the broker drops a request published while no server is
-  bound. The call fails only when the SDK's own request timeout expires: 60 s by default, or the
-  `timeout` you pass per call. The transport's `responseTimeout` (30 s) reports the missing
-  response through `onerror`, but does not end the call.
+- **No delivery guarantee.** The endpoint queue is not durable. A request published while no
+  server is bound fails at once: the broker returns it, and the client fails the call with
+  JSON-RPC error `-32000` (`data.reason: "no-route"`). A request in flight when the server goes
+  away is not answered. That call fails only when the SDK's own request timeout expires: 60 s by
+  default, or the `timeout` you pass per call. The transport's `responseTimeout` (30 s) reports
+  the missing response through `onerror`, but does not end the call.
 - **RabbitMQ only.** `amqplib` speaks AMQP 0-9.1. The examples run against RabbitMQ 3.12 and 4.4.
   Other 0-9.1 brokers are untested, and AMQP 1.0-only brokers cannot connect.
 
