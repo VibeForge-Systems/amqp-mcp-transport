@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-07
+
 ### Changed
-- **The package is renamed `@vibeforge-systems/amqp-mcp-transport`,** and is published to npm from the next release. Moving from `amqp-mcp-transport` changes the dependency name and import specifier only. The exports, the exchange and the routing keys are the same, and so is the wire format. The release tarball is now `vibeforge-systems-amqp-mcp-transport-<version>.tgz`.
+- **The package is renamed `@vibeforge-systems/amqp-mcp-transport`,** and 1.3.0 is its first release on npm. Moving from `amqp-mcp-transport` changes the dependency name and import specifier only. The exports, the exchange and the routing keys are the same, and so is the wire format. The release tarball is now `vibeforge-systems-amqp-mcp-transport-<version>.tgz`.
 - The client publishes requests `mandatory: true`. When no server queue is bound for a request's key, the broker returns it, and the call fails at once with JSON-RPC error `-32000` (`data.reason: "no-route"`, plus the exchange, routing key and broker reply). Before, the broker dropped the request and the call waited for the SDK's request timeout, 60 s by default. Only calls that could never have been answered behave differently. Client notifications are unchanged. See [TRANSPORT_CONTRACT.md](./docs/TRANSPORT_CONTRACT.md) §6.
 
 ### Added

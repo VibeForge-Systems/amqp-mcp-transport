@@ -4,7 +4,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](package.json)
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](CHANGELOG.md)
 [![MCP SDK](https://img.shields.io/badge/%40modelcontextprotocol%2Fsdk-%3E%3D1.17.1_%3C2-6f42c1.svg)](package.json)
 
 `@vibeforge-systems/amqp-mcp-transport` lets an MCP client and an MCP server talk through RabbitMQ
@@ -12,11 +12,11 @@ instead of over a direct HTTP or stdio connection. Hand `AMQPServerTransport` to
 `AMQPClientTransport` to a `Client`, and the SDK does the rest. Every message stays a plain JSON-RPC
 2.0 object on the wire. Routing and correlation live in AMQP message properties.
 
-> **1.2.0 serves the 2025-era protocol** through `@modelcontextprotocol/sdk` v1.
+> **1.3.0 serves the 2025-era protocol** through `@modelcontextprotocol/sdk` v1.
 > [MCP Open Discovery](https://github.com/VibeForge-Systems/mcp-open-discovery) uses it
 > as its AMQP transport. **2.0.0 implements MCP 2026-07-28 and targets Q4 2026.** Its wire format
-> is specified in [docs/BINDING.md](docs/BINDING.md). Its first piece, binding-core, is on `main`
-> and ships in the next release.
+> is specified in [docs/BINDING.md](docs/BINDING.md). Its first piece, binding-core, ships in
+> 1.3.0 as `@vibeforge-systems/amqp-mcp-transport/binding`.
 
 ---
 
@@ -63,9 +63,9 @@ resource, all through the broker. The RabbitMQ management UI is at <http://local
 npm install @vibeforge-systems/amqp-mcp-transport @modelcontextprotocol/sdk
 ```
 
-- **The npm package is published from the next release on.** Until then, install from GitHub:
-  `npm install github:VibeForge-Systems/amqp-mcp-transport`. That installs `main`, which already
-  carries the new name. The `prepare` script builds it on install.
+- **1.3.0 is the first release on npm.** To track unreleased work, install `main` from GitHub:
+  `npm install github:VibeForge-Systems/amqp-mcp-transport`. The `prepare` script builds it on
+  install.
 - **v1.2.0 and earlier are named `amqp-mcp-transport`.** None of them was published to npm. The
   v1.2.0 tarball is attached to its
   [GitHub release](https://github.com/VibeForge-Systems/amqp-mcp-transport/releases/tag/v1.2.0).
