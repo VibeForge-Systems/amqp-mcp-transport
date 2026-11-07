@@ -21,13 +21,13 @@ The snippets use top-level `await`, so run them as ES modules.
 npm install @vibeforge-systems/amqp-mcp-transport @modelcontextprotocol/sdk
 ```
 
-The npm package is published from the next release on. Until then, install from GitHub:
+1.3.0 is the first release on npm. To track unreleased work, install `main` from GitHub instead:
 
 ```bash
 npm install github:VibeForge-Systems/amqp-mcp-transport
 ```
 
-That installs `main`, and the `prepare` script builds it on install. The package is ESM.
+The `prepare` script builds it on install. The package is ESM.
 CommonJS code on Node 20.19 or later, or 22.12 or later, can `require()` it.
 
 ## Start a broker
