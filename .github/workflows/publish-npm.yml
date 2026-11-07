@@ -1,8 +1,9 @@
 name: Publish to npm
 
-# Manual only. Run it from the Actions tab against a release tag once the package name is settled
-# (docs/REARCHITECTURE_PLAN_2026-07-28.md, D-6). Requires the NPM_TOKEN repository secret.
-# Tagging never publishes to npm; see release.yml.
+# Manual only. Run it from the Actions tab against a release tag. It publishes
+# @vibeforge-systems/amqp-mcp-transport; package.json's publishConfig makes the scoped package public.
+# Requires the NPM_TOKEN repository secret, from an npm account that can publish to the
+# @vibeforge-systems scope. Tagging never publishes to npm; see release.yml.
 
 on:
   workflow_dispatch:

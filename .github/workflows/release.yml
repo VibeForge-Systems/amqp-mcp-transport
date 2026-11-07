@@ -2,12 +2,12 @@ name: Release
 
 # A version tag (vX.Y.Z) builds, tests and packs the package, then publishes a GitHub Release
 # with the packed tarball attached. It does NOT publish to npm: that is a separate, deliberate
-# step (publish-npm.yml), because an npm release cannot be taken back and the package name is
-# still an open decision (docs/REARCHITECTURE_PLAN_2026-07-28.md, D-6).
+# step (publish-npm.yml), because an npm release cannot be taken back.
 #
-# The attached tarball is what consumers can pin instead of a git dependency, e.g.
-#   "amqp-mcp-transport": "https://github.com/VibeForge-Systems/amqp-mcp-transport/releases/download/v1.2.0/amqp-mcp-transport-1.2.0.tgz"
+# The attached tarball is what consumers can pin instead of a registry or git dependency, e.g.
+#   "@vibeforge-systems/amqp-mcp-transport": "https://github.com/VibeForge-Systems/amqp-mcp-transport/releases/download/vX.Y.Z/vibeforge-systems-amqp-mcp-transport-X.Y.Z.tgz"
 # which npm installs without running a build and records with an integrity hash it checks.
+# Releases up to v1.2.0 were published unscoped, as amqp-mcp-transport-<version>.tgz.
 
 on:
   push:
@@ -39,6 +39,8 @@ jobs:
             exit 1
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
+          # npm pack names a scoped package's tarball <scope>-<name>-<version>.tgz.
+          echo "TARBALL=vibeforge-systems-amqp-mcp-transport-${version}.tgz" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: npm ci
@@ -55,8 +57,9 @@ jobs:
       - name: Pack
         run: |
           npm pack
-          sha256sum "amqp-mcp-transport-${VERSION}.tgz" > "amqp-mcp-transport-${VERSION}.tgz.sha256"
-          cat "amqp-mcp-transport-${VERSION}.tgz.sha256"
+          test -f "${TARBALL}"
+          sha256sum "${TARBALL}" > "${TARBALL}.sha256"
+          cat "${TARBALL}.sha256"
 
       - name: Release notes from CHANGELOG
         run: |
@@ -76,5 +79,5 @@ jobs:
           name: ${{ github.ref_name }}
           body_path: release-notes.md
           files: |
-            amqp-mcp-transport-${{ env.VERSION }}.tgz
-            amqp-mcp-transport-${{ env.VERSION }}.tgz.sha256
+            ${{ env.TARBALL }}
+            ${{ env.TARBALL }}.sha256

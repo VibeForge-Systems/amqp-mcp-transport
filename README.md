@@ -1,381 +1,345 @@
-<!-- BEGIN UNIFIED BRAND HEADER (copy/paste to other repos) -->
-<div align="center">
+# AMQP MCP Transport
 
-  <p>
-    <img src="./mcp-open-discovery-logo-white.png" alt="MCP Open Discovery" width="128" height="128" />
-    <img src="./CodedwithAI-white-transparent.png" alt="Coded with AI" width="128" height="128" />
-  </p>
+**Model Context Protocol over a message broker: client and server transports for AMQP 0-9.1 (RabbitMQ) that plug into the MCP TypeScript SDK, and the binding that takes them to MCP 2026-07-28.**
 
-  <p><em>Forging Intelligent Systems with Purpose</em></p>
-  <p><strong>Unified launch: MCP Open Discovery • AMQP Transport • VS Code Bridge</strong></p>
-  <p>
-    <a href="https://modelcontextprotocol.io/" target="_blank">Model Context Protocol</a>
-    ·
-    <a href="https://github.com/VibeForge-Systems/mcp_open_discovery" target="_blank">MCP Open Discovery</a>
-    ·
-    <a href="https://github.com/VibeForge-Systems/amqp-mcp-transport" target="_blank">AMQP Transport</a>
-    ·
-    <a href="https://github.com/nagual69/vscode-amqp-extension-mcp-open-discovery" target="_blank">VS Code AMQP Bridge</a>
-    ·
-    <a href="https://www.linkedin.com/in/toby-schmeling-2200556/" target="_blank">LinkedIn</a>
-  </p>
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](CHANGELOG.md)
+[![MCP SDK](https://img.shields.io/badge/%40modelcontextprotocol%2Fsdk-%3E%3D1.17.1_%3C2-6f42c1.svg)](package.json)
 
-</div>
-<!-- END UNIFIED BRAND HEADER -->
+`@vibeforge-systems/amqp-mcp-transport` lets an MCP client and an MCP server talk through RabbitMQ
+instead of over a direct HTTP or stdio connection. Hand `AMQPServerTransport` to an `McpServer` and
+`AMQPClientTransport` to a `Client`, and the SDK does the rest. Every message stays a plain JSON-RPC
+2.0 object on the wire. Routing and correlation live in AMQP message properties.
 
-# AMQP Transport for Model Context Protocol (MCP)
+> **1.2.0 serves the 2025-era protocol** through `@modelcontextprotocol/sdk` v1.
+> [MCP Open Discovery](https://github.com/VibeForge-Systems/mcp-open-discovery) uses it
+> as its AMQP transport. **2.0.0 implements MCP 2026-07-28 and targets Q4 2026.** Its wire format
+> is specified in [docs/BINDING.md](docs/BINDING.md). Its first piece, binding-core, is on `main`
+> and ships in the next release.
 
-An AMQP-based transport implementation for the Model Context Protocol, enabling distributed MCP communication over AMQP message queues.
+---
 
-**Scope:** the 2025-era MCP protocol (`@modelcontextprotocol/sdk` v1). All messages are raw JSON-RPC 2.0 on the wire, with transport metadata in AMQP message properties. The normative wire behaviour is [docs/TRANSPORT_CONTRACT.md](./docs/TRANSPORT_CONTRACT.md).
+## Why a broker
 
-## Project Status
+- **The server opens no port.** Server and client both dial out to the broker. An MCP server can
+  sit in a network that accepts no inbound connections and still be reachable.
+- **Clients address an exchange, not a host.** A server can restart or move without its clients
+  being reconfigured. The transport reconnects on its own, and `AmqpServerRuntime` rebuilds the
+  server after an outage.
+- **It runs on messaging you already operate.** Authentication, TLS (`amqps://`), virtual hosts,
+  per-user permissions and monitoring are the broker's, not one more HTTP endpoint per server.
+- **A path to pools.** 2.0.0 serves a logical server from competing consumers on one shared queue,
+  so any instance can answer any request. 1.x serves one server per exchange.
 
-- **1.2.0** is the canonical home of the AMQP transport that Open Discovery 3.0 runs in production: the cross-client response-leak fix, separate client/server notification namespaces, broker consumer-cancel handling, and the `AmqpServerRuntime` recovery loop now live here.
-- **Not yet compliant with MCP 2026-07-28.** The stateless protocol needs a re-architecture, planned in [docs/REARCHITECTURE_PLAN_2026-07-28.md](./docs/REARCHITECTURE_PLAN_2026-07-28.md).
-- Servers do not initiate requests over this transport, so sampling and elicitation are unavailable (contract §5).
+The cost is a broker to run and an extra network hop. 1.x also has limits that HTTP does not: see
+[What 1.x does not do](#what-1x-does-not-do).
 
-## Installation
+---
 
-The package is not on npm yet. Install it straight from GitHub; the `prepare` script builds it on install:
+## Quick start
 
-```bash
-npm install github:VibeForge-Systems/amqp-mcp-transport#v1.2.0 amqplib @modelcontextprotocol/sdk
-```
-
-`@modelcontextprotocol/sdk` (>=1.17.1 <2) is a peer dependency, so the transport shares your application's SDK instance. The package is ESM; CommonJS consumers on Node ≥ 22.12 can `require()` it directly.
-
-## Use with MCP TypeScript SDK examples
-
-You can plug this AMQP transport into the official MCP TypeScript SDK examples by swapping the transport object. The SDK is transport‑agnostic—any example that constructs a `Client` or an `McpServer`/`Server` can use `AMQPClientTransport`/`AMQPServerTransport` instead of the HTTP, SSE, WebSocket, or in‑memory transports.
-
-- Repository: https://github.com/modelcontextprotocol/typescript-sdk
-- Examples directory: https://github.com/modelcontextprotocol/typescript-sdk/tree/main/src/examples
-
-Showcase wiring
-
-- Server (replace the example’s HTTP/SSE transport):
-  - Find where the example creates a transport, e.g. `new StreamableHTTPServerTransport(...)` or `new SSEServerTransport(...)`.
-  - Replace that with:
-    ```ts
-    import { AMQPServerTransport } from "amqp-mcp-transport";
-    // or: import { AMQPServerTransport } from "../src/transports/index.js"; // if using this repo locally
-
-    const transport = new AMQPServerTransport({
-      amqpUrl: process.env.AMQP_URL || "amqp://localhost:5672",
-      exchangeName: process.env.AMQP_EXCHANGE || "mcp.examples",
-      queuePrefix: "mcp.example", // server queue namespace for your app
-      prefetchCount: 1,
-    });
-
-    await mcpServer.connect(transport); // or: await server.connect(transport)
-    ```
-  - Many SDK examples wrap the server with Express for HTTP. For AMQP, you don’t need Express—just create your `McpServer`/`Server`, register tools/resources/prompts, and `connect` with the AMQP transport.
-
-- Client (replace the example’s HTTP/SSE/WebSocket transport):
-  - Find where the example creates a client transport, e.g. `new StreamableHTTPClientTransport(url)`.
-  - Replace that with:
-    ```ts
-    import { AMQPClientTransport } from "amqp-mcp-transport";
-
-    const transport = new AMQPClientTransport({
-      amqpUrl: process.env.AMQP_URL || "amqp://localhost:5672",
-      exchangeName: process.env.AMQP_EXCHANGE || "mcp.examples",
-      serverQueuePrefix: "mcp.example", // should match the server’s queuePrefix
-      responseTimeout: 30000,
-    });
-
-    await client.connect(transport);
-    ```
-
-Tips
-
-- Keep `queuePrefix` (server) and `serverQueuePrefix` (client) aligned. For demos, `mcp.example` keeps traffic isolated from other systems on the same broker.
-- Use `AMQP_EXCHANGE` to isolate demo traffic. The routing exchange used is `${exchangeName}.mcp.routing`.
-- To point at a broker started via Docker on your local machine, use `amqp://<user>:<pass>@localhost:5672` as AMQP_URL.
-
-Spec alignment (Custom Transports)
-
-This transport implements the MCP `Transport` contract per the spec:
-- Methods: `start()`, `send()`, `close()`, `setProtocolVersion(version)`
-- Callbacks: `onmessage`, `onerror`, `onclose`, and `sessionId`
-- JSON‑RPC messages preserved end‑to‑end; start is idempotent and lifecycle is SDK‑managed (`client.connect()` / `server.connect()` will call `start()`).
-
-Spec reference: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports (see the “Custom Transports” section).
-
-### What's Included
-
-- **Client Transport** (`AMQPClientTransport`): Enables MCP clients to connect to servers via AMQP
-- **Server Transport** (`AMQPServerTransport`): Allows MCP servers to receive requests through AMQP
-- **TypeScript Support**: Full type definitions and compile-time safety
-- **Example Code**: Working client and server examples in the `examples/` directory
-- **Docker Setup**: `docker-compose.yml` for local RabbitMQ development
-- **Test Framework**: Jest configuration ready for unit testing
-
-### Quick Verification
+You need Node 18 or later and Docker.
 
 ```bash
-# Install dependencies
-npm install
+git clone https://github.com/VibeForge-Systems/amqp-mcp-transport
+cd amqp-mcp-transport
+npm install                  # also builds the package, via the prepare script
+docker compose up -d         # RabbitMQ on localhost:5672, user admin, password admin123
+export AMQP_URL=amqp://admin:admin123@localhost:5672
 
-# Build the project
-npm run build
-
-# Start RabbitMQ for testing
-docker-compose up -d
-
-# If using the provided docker-compose.yml, RabbitMQ credentials are:
-#   username: admin
-#   password: admin123
-# Set AMQP_URL accordingly in your shell/session:
-# PowerShell
-#   $env:AMQP_URL = "amqp://admin:admin123@localhost:5672"
-# Bash
-#   export AMQP_URL="amqp://admin:admin123@localhost:5672"
-
-# Run the example server (in one terminal)
-npm run example:server
-
-# Run the example client (in another terminal)
-npm run example:client
+npm run example:server       # terminal 1
+npm run example:client       # terminal 2, with the same AMQP_URL
 ```
 
-## Getting Started
+The client lists the example server's tools, resources and prompts, calls a tool and reads a
+resource, all through the broker. The RabbitMQ management UI is at <http://localhost:15672>.
 
-This project provides an AMQP transport implementation for MCP, allowing MCP clients and servers to communicate through AMQP message queues instead of direct connections. This enables:
+---
 
-- **Distributed Architecture**: Clients and servers can run on different machines
-- **Scalability**: Multiple servers can handle requests through load balancing
-- **Reliability**: Message persistence and delivery guarantees through AMQP brokers
-- **Flexibility**: Pub/sub patterns for notifications and events
-
-## Architecture
-
-The AMQP transport implements the MCP `Transport` interface and uses:
-
-- **One topic exchange**: `${exchangeName}.mcp.routing`, with three namespaces — `mcp.request.*` and `mcp.client-notification.*` (client → server) and `mcp.server-notification.*` (server → clients)
-- **Per-request correlation**: every request carries `replyTo` + `correlationId`; the server rewrites each request id to a unique internal id so concurrent clients reusing ids never receive each other's responses
-- **One server per exchange**: the server endpoint is an exclusive queue, so a second server on the same exchange would answer every request too (contract §1)
-- **JSON Serialization**: For message encoding
-
-Routing & replies
-
-- Requests publish to `${exchangeName}.mcp.routing` as `mcp.request.{method}` (e.g., `mcp.request.tools.list`), client notifications as `mcp.client-notification.{method}`, server notifications as `mcp.server-notification.{method}`; `/` in method names becomes `.`.
-- The server replies directly to the client's exclusive reply queue using `replyTo` and preserves the original `correlationId` for JSON‑RPC responses—responses are not sent via the routing exchange.
-- All messages include `contentType: 'application/json'` in AMQP properties for proper serialization.
-- For advanced routing (e.g., category-based routing), use the `routingKeyStrategy` configuration option. It receives the message and its routing type, and must keep each message inside its namespace.
-- For servers, `AmqpServerRuntime` owns the transport/server pair and re-attaches a fresh server from your factory after the broker comes back.
-
-SDK lifecycle
-
-- The MCP SDK manages the transport lifecycle. Prefer `client.connect(transport)` and `server.connect(transport)`. The SDK will call `transport.start()`; you shouldn’t call it yourself.
-
-Environment
-
-- To avoid crosstalk across shared brokers in demos, the examples honor `AMQP_EXCHANGE`:
-  - PowerShell:
-    ```powershell
-    $env:AMQP_EXCHANGE = "mcp.examples"
-    ```
-  - Defaults to `mcp.examples` in the examples; for production pick a stable name like `mcp.notifications`.
-
-## Environment mapping (what each var means)
-
-- AMQP_URL: Broker connection URL. Use localhost when running the examples on your machine; use the service name (e.g., `rabbitmq`) when running inside Docker Compose.
-  - Host example (PowerShell): `$env:AMQP_URL = "amqp://user:pass@localhost:5672"`
-  - Docker Compose (app container): `AMQP_URL=amqp://user:pass@rabbitmq:5672`
-- AMQP_EXCHANGE: Base exchange name. The transport publishes requests/notifications to the topic exchange `${AMQP_EXCHANGE}.mcp.routing`.
-  - Examples often use `mcp.examples` for isolation. Production might use `mcp.notifications`.
-- queuePrefix / serverQueuePrefix: Queue namespace for the server implementation. These are code-level options, not environment variables in the examples by default.
-  - In examples: server uses `queuePrefix: "mcp.example"`; client uses `serverQueuePrefix: "mcp.example"` to match.
-  - If you need to talk to an existing server that uses `mcp.discovery` queues, change those literals in `examples/server.ts` and `examples/client.ts` to `"mcp.discovery"`.
-
-Docker vs host networking
-
-- Running examples directly on your host machine: use `localhost` in AMQP_URL.
-- Running code inside Docker Compose: use the service name `rabbitmq` in AMQP_URL.
-- The routing exchange is always derived from AMQP_EXCHANGE as `${AMQP_EXCHANGE}.mcp.routing`.
-
-## Installation
+## Install
 
 ```bash
-npm install @modelcontextprotocol/sdk amqplib
+npm install @vibeforge-systems/amqp-mcp-transport @modelcontextprotocol/sdk
 ```
 
-## Project Structure
+- **The npm package is published from the next release on.** Until then, install from GitHub:
+  `npm install github:VibeForge-Systems/amqp-mcp-transport`. That installs `main`, which already
+  carries the new name. The `prepare` script builds it on install.
+- **v1.2.0 and earlier are named `amqp-mcp-transport`.** None of them was published to npm. The
+  v1.2.0 tarball is attached to its
+  [GitHub release](https://github.com/VibeForge-Systems/amqp-mcp-transport/releases/tag/v1.2.0).
+  The wire format did not change with the name.
+- **The SDK is a peer dependency** (`>=1.17.1 <2`), so the transport shares your application's SDK
+  instance. `amqplib` is a regular dependency and installs with the package.
+- **The package is ESM.** CommonJS code on Node 20.19 or later, or 22.12 or later, can
+  `require()` it.
 
-```
-├── src/
-│   ├── transports/
-│   │   ├── amqp-client-transport.ts        # Client-side transport
-│   │   ├── amqp-server-transport.ts        # Server-side transport
-│   │   └── types.ts                        # Shared types
-│   └── examples/
-│       ├── client.ts                       # Example client
-│       └── server.ts                       # Example server
-├── package.json
-├── tsconfig.json
-└── README.md
-```
+---
 
-## Key Features
+## Use it
 
-- **Standard MCP Transport**: Implements the official Transport interface
-- **Connection Management**: Automatic reconnection and error handling
-- **Message Persistence**: Durable queues and exchanges
-- **Correlation Tracking**: Proper request/response pairing
-- **Type Safety**: Full TypeScript support with proper MCP types
+### Server
 
-## Usage
+```ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { AMQPServerTransport } from "@vibeforge-systems/amqp-mcp-transport";
+import { z } from "zod";
 
-### Server Setup
+const server = new McpServer({ name: "echo-server", version: "1.0.0" });
 
-```typescript
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { AMQPServerTransport } from "./transports/amqp-server-transport.js";
-
-const server = new Server(
-  {
-    name: "example-server",
-    version: "1.0.0",
-  },
-  { capabilities: { tools: {}, resources: {}, prompts: {} } }
-);
-
-// Add your tools, resources, and prompts here
 server.registerTool(
   "echo",
-  {
-    description: "Echo back the input",
-    inputSchema: { message: z.string() },
-  },
-  async ({ message }) => ({
-    content: [{ type: "text", text: message }],
-  })
+  { description: "Echo the input back", inputSchema: { text: z.string() } },
+  async ({ text }) => ({ content: [{ type: "text", text }] }),
 );
 
 const transport = new AMQPServerTransport({
-  amqpUrl: process.env.AMQP_URL || "amqp://localhost:5672",
-  exchangeName: process.env.AMQP_EXCHANGE || "mcp.examples",
-  queuePrefix: "mcp.server",
+  amqpUrl: process.env.AMQP_URL ?? "amqp://admin:admin123@localhost:5672",
+  exchangeName: "mcp.examples",
+  queuePrefix: "mcp.example",
 });
 
-await server.connect(transport); // SDK calls transport.start()
+await server.connect(transport); // the SDK calls transport.start()
 ```
 
-### Client Setup
+### Client
 
-```typescript
+```ts
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { AMQPClientTransport } from "./transports/amqp-client-transport.js";
+import { AMQPClientTransport } from "@vibeforge-systems/amqp-mcp-transport";
 
 const transport = new AMQPClientTransport({
-  amqpUrl: process.env.AMQP_URL || "amqp://localhost:5672",
-  exchangeName: process.env.AMQP_EXCHANGE || "mcp.examples",
-  serverQueuePrefix: "mcp.server",
+  amqpUrl: process.env.AMQP_URL ?? "amqp://admin:admin123@localhost:5672",
+  exchangeName: "mcp.examples",       // must match the server's
+  serverQueuePrefix: "mcp.example",
 });
 
-const client = new Client(
-  { name: "example-client", version: "1.0.0" },
-  { capabilities: {} }
-);
+const client = new Client({ name: "echo-client", version: "1.0.0" });
+await client.connect(transport);
 
-await client.connect(transport); // SDK calls transport.start()
+const result = await client.callTool({ name: "echo", arguments: { text: "hello over AMQP" } });
+console.log(result.content); // [ { type: 'text', text: 'hello over AMQP' } ]
 
-const tools = await client.listTools();
-const result = await client.callTool({
-  name: "echo",
-  arguments: { message: "Hello" },
-});
+await client.close();
 ```
 
-## Configuration Options
+Client and server find each other through `exchangeName` alone. `serverQueuePrefix` is required,
+but 1.x does not use it for routing.
 
-### Common Options
+### Keep a server up across broker outages
 
-- amqpUrl: RabbitMQ connection URL
-- exchangeName: Base exchange name (routing uses `${exchangeName}.mcp.routing`)
-- reconnectDelay: Delay between reconnection attempts (default: 5000ms)
-- maxReconnectAttempts: Maximum reconnection attempts (default: 10)
-- prefetchCount: Channel prefetch (server default 1, client default 10)
-- messageTTL, queueTTL: TTLs for ephemeral queues
+The transport reconnects by itself and keeps its queue name. By default it tries every 5 seconds,
+up to 10 times. If every attempt fails, it closes for good. `AmqpServerRuntime` handles that case.
+It builds a new transport, attaches a new server from your factory, and retries with exponential
+backoff: 30 seconds at first, growing to at most 5 minutes, with no retry limit by default.
 
-### Server-Specific Options
+```ts
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { AmqpServerRuntime } from "@vibeforge-systems/amqp-mcp-transport";
 
-- queuePrefix: Prefix for server queues (e.g., `mcp.server`)
+function buildServer(): McpServer {
+  const server = new McpServer({ name: "echo-server", version: "1.0.0" });
+  // register tools, resources and prompts here
+  return server;
+}
 
-### Client-Specific Options
+const runtime = new AmqpServerRuntime<McpServer>();
 
-- serverQueuePrefix: Prefix for target server queues (should match server’s queuePrefix)
-- responseTimeout: Timeout for responses (default: 30000ms)
+const result = await runtime.start(
+  { create: async () => buildServer() },
+  {
+    enabled: true,
+    url: process.env.AMQP_URL ?? "amqp://admin:admin123@localhost:5672",
+    exchange: "mcp.examples",
+    queuePrefix: "mcp.example",
+  },
+);
+if (!result.started) {
+  console.error(result.error); // recovery keeps retrying in the background
+}
+
+runtime.getStatus(); // connected, exchange, recovery state: what a health endpoint needs
+process.on("SIGTERM", () => void runtime.stop());
+```
+
+A request in flight when the transport is rebuilt is never answered. Clients own timeout and
+retry. [docs/getting-started.md](docs/getting-started.md) covers options, TLS, logging and custom
+routing.
+
+---
+
+## How it works
+
+All traffic goes through one durable topic exchange, `${exchangeName}.mcp.routing`.
+
+| Routing key | Published by | Consumed by |
+| --- | --- | --- |
+| `mcp.request.<method>` | clients | the server's endpoint queue |
+| `mcp.client-notification.<method>` | clients | the server's endpoint queue |
+| `mcp.server-notification.<method>` | the server | every client |
+
+`<method>` is the JSON-RPC method with `/` replaced by `.`, so `tools/call` routes as
+`mcp.request.tools.call`.
+
+- **Responses skip the exchange.** Each request carries `replyTo` and `correlationId`. The server
+  answers straight to that client's exclusive reply queue.
+- **Two clients can both send `id: 1`.** The server rewrites every request id to a unique internal
+  id before the SDK sees it, and restores the client's id on the response. It never routes a
+  response by the id a client chose.
+- **The body is the JSON-RPC message, nothing more.** Messages go out with
+  `content_type: application/json`. An inbound message over 1 MiB (`maxMessageSize`), one that is
+  not JSON, or one that is not valid JSON-RPC is dropped and reported through `onerror`. The
+  server rejects it without requeue. The client acknowledges it and discards it.
+- **`routingKeyStrategy` can change the suffix.** It must keep each message inside its namespace,
+  and nothing enforces that. A key outside the patterns above matches no queue, so the broker
+  drops the message.
+
+[docs/TRANSPORT_CONTRACT.md](docs/TRANSPORT_CONTRACT.md) is the normative statement of all of this.
+`src/transports/__tests__/contract.test.ts` pins each clause by number.
+
+---
+
+## What 1.x does not do
+
+- **One server per exchange.** Each server declares its own queue, and a topic exchange copies
+  every request to every queue bound to it. A second server on the same exchange would receive
+  and answer every request as well. Give each server its own `exchangeName`. Pools arrive in
+  2.0.0.
+- **No server-initiated requests.** Sampling and elicitation are unavailable. The server
+  transport rejects an outbound request instead of publishing it.
+- **No protocol session.** All clients share one endpoint. `initialize` gates nothing, and
+  negotiated state is last-writer-wins.
+- **The SDK client skips `initialize`.** `Client.connect()` skips the handshake when its
+  transport has a `sessionId`, and `AMQPClientTransport` sets one. Calls still work, because the
+  server gates nothing on `initialize`, but `getServerCapabilities()` and `getServerVersion()`
+  return `undefined`, and `enforceStrictCapabilities` fails every call that needs a capability.
+- **Server notifications are broadcast.** Every connected client receives every server
+  notification, progress and log messages included.
+- **Cancellation does not reach the server.** When a call times out or is aborted, the SDK client
+  sends `notifications/cancelled`. The server transport rewrites request ids but not the id inside
+  a cancellation, so the server never matches it, and the tool runs to completion.
+- **No delivery guarantee.** The endpoint queue is not durable. A request in flight when the
+  server goes away is not answered, and the broker drops a request published while no server is
+  bound. The call fails only when the SDK's own request timeout expires: 60 s by default, or the
+  `timeout` you pass per call. The transport's `responseTimeout` (30 s) reports the missing
+  response through `onerror`, but does not end the call.
+- **RabbitMQ only.** `amqplib` speaks AMQP 0-9.1. The examples run against RabbitMQ 3.12 and 4.4.
+  Other 0-9.1 brokers are untested, and AMQP 1.0-only brokers cannot connect.
+
+---
+
+## MCP 2026-07-28 and 2.0.0
+
+MCP 2026-07-28 removes the protocol session. There is no `initialize` handshake. Every request
+carries its own protocol version and client capabilities, and a server must not rely on an earlier
+request. Progress and log messages must stay with the request they belong to, which 1.x
+broadcasts. The 2025-era model of one long-lived `Transport` per connection does not fit, so 2.0.0
+is a re-architecture, not a patch.
+
+- **[docs/BINDING.md](docs/BINDING.md) is the binding specification.** It is a draft, and its
+  design was ratified on 2026-10-28. It defines:
+  - the AMQP 0-9.1 topology for a pool of server instances;
+  - the message mapping, and how envelope fields that mirror the body are checked;
+  - exact cancellation across a pool;
+  - deadlines, redelivery and the dead-letter policy;
+  - a principal model, in which the broker-validated `user_id` becomes the request's `authInfo`;
+  - serving 2025-era clients alongside 2026-era ones on the same broker;
+  - a clause-by-clause mapping to the OASIS *MCP over AMQP 1.0* and *JSON-RPC 2.0 over AMQP 1.0*
+    CSD01 drafts.
+- **`@vibeforge-systems/amqp-mcp-transport/binding` is binding-core.** It is the wire rules of
+  BINDING.md as pure functions, with no `amqplib`, no SDK and no I/O. Third-party implementers can
+  use it to interoperate. The 1.x exports are unchanged.
+- **The serving engine bridges each request to the 2.x SDK's `createMcpHandler`.** A spike against
+  SDK 2.4.0 and RabbitMQ 4.4.0 measured the bridge on an 81-tool server: 0.46 ms at p50 and
+  6.0 ms at p99 per `tools/call`. The method and the numbers are in
+  [docs/history/](docs/history/spike-phase2-2026-10-28/README.md).
+
+Review of the binding is welcome, from MCP implementers and from the OASIS AMQP TC alike. Open an
+issue against BINDING.md.
+
+---
+
+## Used by
+
+- **[MCP Open Discovery](https://github.com/VibeForge-Systems/mcp-open-discovery)** is an
+  infrastructure-discovery MCP server, and uses this package as its AMQP transport. It pins a
+  release tarball, and its merge bar runs its own AMQP contract tests against the installed
+  package, so an upgrade that breaks a clause fails there too.
+
+**Related:** the [MCP Open Discovery Marketplace](https://www.mcp-open-discovery.com) is Open
+Discovery's registry of signed plugins.
+
+---
+
+## Documentation
+
+| Document | What it covers |
+| --- | --- |
+| [docs/getting-started.md](docs/getting-started.md) | Install, broker setup, server, client, runtime, options, TLS, logging |
+| [docs/api-reference.md](docs/api-reference.md) | Every export, every option and its default |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | The failures that actually happen, and what each one means |
+| [docs/TRANSPORT_CONTRACT.md](docs/TRANSPORT_CONTRACT.md) | The normative 1.x wire behaviour |
+| [docs/BINDING.md](docs/BINDING.md) | The draft MCP 2026-07-28 binding for 2.0.0 |
+| [docs/history/](docs/history/) | Dated records: the February 2026 audit, the re-architecture plan, the engine spike |
+
+---
 
 ## Development
 
-### Prerequisites
-
-- Node.js 18+
-- RabbitMQ server running locally or accessible via URL
-- TypeScript
-
-### Building
-
 ```bash
-npm run build
+npm install
+npm test             # Jest; the tests inject a fake connection, so no broker is needed
+npm run lint
+npm run typecheck
+npm run build        # dist/
 ```
 
-### Testing
+- **CI.** `.github/workflows/ci.yml` runs lint, the typecheck, the build, the tests on Node 18, 20
+  and 22, and the examples build.
+- **Releases.** A `vX.Y.Z` tag builds, tests and packs the package, then publishes a GitHub Release
+  with the tarball and its SHA-256 attached. Publishing to npm is a separate, manual workflow.
 
-```bash
-# Start RabbitMQ (using Docker)
-docker run -d --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3-management
-
-# Run unit + integration tests
-npm test
+```text
+src/transports/   the 1.x client and server transports, AmqpServerRuntime and utilities
+src/binding/      binding-core, exported as /binding
+examples/         the client and server behind npm run example:*
+docs/             the documents above; docs/history/ holds the dated records
 ```
 
-### Running Examples
+---
 
-```bash
-# Terminal 1: Start the server (optional env isolation)
-$env:AMQP_EXCHANGE = "mcp.examples"
-npm run example:server
+## Versioning
 
-# Terminal 2: Start the client (uses same exchange)
-$env:AMQP_EXCHANGE = "mcp.examples"
-npm run example:client
-```
+The package follows [Semantic Versioning](https://semver.org/).
 
-## Design Decisions
+- **1.x** is the 2025-era wire format in TRANSPORT_CONTRACT.md.
+- **2.0.0** is MCP 2026-07-28, as specified in BINDING.md. It serves 2025-era clients alongside
+  2026-era ones (BINDING §11).
+- **Moving from `amqp-mcp-transport`** is a change of dependency name and import specifier. The
+  exports, the exchange and the routing keys are the same.
 
-1. **Transport Pattern**: Follows the standard MCP Transport interface rather than creating a custom connector pattern
-2. **Message Format**: Uses JSON-RPC 2.0 format as required by MCP specification
-3. **Queue Strategy**: Uses separate queues for each server instance with routing keys
-4. **Error Handling**: Implements proper error propagation and connection recovery
-5. **Type Safety**: Maintains full compatibility with MCP TypeScript types
+---
 
-## Limitations
+## Support
 
-- Requires RabbitMQ infrastructure
-- Adds network latency compared to direct transports
-- More complex setup than stdio/WebSocket transports
-- Message size limits depend on RabbitMQ configuration
+**Community.** Report bugs and request features through
+[GitHub issues](https://github.com/VibeForge-Systems/amqp-mcp-transport/issues).
 
-## Contributing
+**Commercial.** [VibeForge Systems](https://www.vibeforgesystems.com/) offers commercial support for
+MCP-over-AMQP deployments.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
+**Security.** Report vulnerabilities privately, through a
+[GitHub security advisory](https://github.com/VibeForge-Systems/amqp-mcp-transport/security/advisories/new),
+never a public issue. [SECURITY.md](SECURITY.md) describes the process and the supported versions.
 
-## License
+---
 
-Apache License 2.0 — see `LICENSE` and `NOTICE` for full terms and attributions.
+## Contributing and licence
 
-Why Apache 2.0 for this transport?
+- Start with [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- Release history is in [CHANGELOG.md](CHANGELOG.md).
 
-- Explicit patent grant and defensive termination provide clarity for enterprises
-- Widely adopted for infrastructure components and connectors
-- Encourages adoption while preserving contributor protections
-- Compatible with many open-source and commercial ecosystems
+Licensed under the [Apache License 2.0](LICENSE). See [NOTICE](NOTICE).
 
+Built by [VibeForge Systems](https://www.vibeforgesystems.com/).

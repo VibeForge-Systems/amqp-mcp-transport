@@ -1,5 +1,5 @@
 /**
- * Transport contract pins, ported from Open Discovery 3.0
+ * Transport contract pins, ported from MCP Open Discovery
  * (testing/test_amqp_transport.js, test_amqp_consumer_cancel.js and the
  * broker-free cases of test_amqp_extension_contract.js).
  *

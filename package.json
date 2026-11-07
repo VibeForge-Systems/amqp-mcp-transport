@@ -1,7 +1,7 @@
 {
-  "name": "amqp-mcp-transport",
+  "name": "@vibeforge-systems/amqp-mcp-transport",
   "version": "1.2.0",
-  "description": "AMQP transport implementation for Model Context Protocol",
+  "description": "MCP client and server transports over AMQP 0-9.1 (RabbitMQ), and binding-core for the MCP 2026-07-28 AMQP binding",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -34,11 +34,12 @@
     "mcp",
     "model-context-protocol",
     "amqp",
+    "rabbitmq",
     "transport",
     "typescript",
     "message-queue"
   ],
-  "author": "Toby Schmeling",
+  "author": "VibeForge Systems",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -75,5 +76,8 @@
   ],
   "peerDependencies": {
     "@modelcontextprotocol/sdk": ">=1.17.1 <2"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

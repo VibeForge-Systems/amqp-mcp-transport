@@ -1,441 +1,185 @@
-# API Reference
+# API reference
 
-**Wire Format:** This transport targets the 2025-era MCP protocol; [TRANSPORT_CONTRACT.md](./TRANSPORT_CONTRACT.md) is normative. All messages are sent as raw JSON-RPC 2.0 on the wire, with transport metadata (correlationId, replyTo, contentType) in AMQP message properties. No custom envelope wrapping is used.
+Everything `@vibeforge-systems/amqp-mcp-transport` exports, for 1.x. The wire behaviour behind it
+is [TRANSPORT_CONTRACT.md](./TRANSPORT_CONTRACT.md). For a guided tour, read
+[getting-started.md](./getting-started.md) first.
 
-## Table of Contents
-
-- [AMQPClientTransport](#amqpclienttransport)
-- [AMQPServerTransport](#amqpservertransport)
-- [Options](#options)
-- [Utility Functions](#utility-functions)
-- [Error Types](#error-types)
+| Entry point | Contents |
+| --- | --- |
+| `@vibeforge-systems/amqp-mcp-transport` | The transports, `AmqpServerRuntime`, the utilities and their types |
+| `@vibeforge-systems/amqp-mcp-transport/binding` | binding-core, the pure wire rules of the draft 2.x binding |
 
 ## AMQPClientTransport
 
-AMQP client transport for MCP. Use it with the MCP SDK client: the SDK will call start() internally when you call client.connect(transport).
-
-### Constructor
-
-```typescript
-new AMQPClientTransport(config: AMQPClientTransportOptions)
+```ts
+new AMQPClientTransport(options: AMQPClientTransportOptions)
 ```
 
-Required options:
+An MCP SDK `Transport` for a `Client`. `AmqpClientTransport` is the same class.
 
-- amqpUrl: string
-- exchangeName: string
-- serverQueuePrefix: string
+- **The constructor throws** if `amqpUrl`, `exchangeName` or `serverQueuePrefix` is missing.
+- **`start()`** connects, declares the exchange, an exclusive reply queue and an exclusive
+  notification queue bound to `mcp.server-notification.#`. `Client.connect()` calls it. It is
+  idempotent and rejects if the broker is unreachable.
+- **`send(message)`** publishes a request under `mcp.request.<method>` with `replyTo` and a new
+  `correlationId`, or a notification under `mcp.client-notification.<method>`. It throws
+  `Transport not connected` while disconnected, and throws for a JSON-RPC response, since servers
+  send no requests over this transport.
+- **`close()`** stops reconnecting, forgets pending requests, closes the channel and connection,
+  and fires `onclose` once.
+- **`sessionId`** is a client-local UUID that prefixes each request's `correlationId`. It is not
+  an MCP session. Because it is set, `Client.connect()` skips `initialize`.
+- **`onmessage`, `onerror`, `onclose`** are the SDK's callbacks.
 
-### Lifecycle
-
-- start(): Promise<void> — Initializes connection, response queue, and subscribes to notifications. Called by the MCP SDK during Client.connect().
-- close(): Promise<void> — Closes channels and connection and clears pending requests.
-- setProtocolVersion(version: string): void — MCP SDK compatibility.
-
-### Message flow
-
-- Requests: Published to the topic exchange `${exchangeName}.mcp.routing` with routing key `mcp.request.{method}` (with `/` replaced by `.`). Each request includes correlationId and replyTo (the client's exclusive response queue) in AMQP message properties.
-- Responses: Received directly on the client's response queue as raw JSON-RPC 2.0 messages (no envelope), matched by correlationId.
-- Client notifications: Published with routing key `mcp.client-notification.{method}`.
-- Server notifications: Consumed via the `mcp.server-notification.#` binding pattern.
-- Responses: Rejected — servers do not initiate requests over this transport.
-- Custom routing: Use the `routingKeyStrategy` option to implement custom routing key derivation (e.g., category-based routing).
-
-### Callbacks
-
-- onmessage?: (message: JSONRPCMessage) => void — Invoked for responses and notifications.
-- onerror?: (error: Error) => void
-- onclose?: () => void
+Reconnecting gives the client a new reply queue, so a response to a request sent before the
+reconnect never arrives.
 
 ## AMQPServerTransport
 
-AMQP server transport for MCP with per-request response correlation.
-
-### Constructor
-
-```typescript
-new AMQPServerTransport(config: AMQPServerTransportOptions)
+```ts
+new AMQPServerTransport(options: AMQPServerTransportOptions)
 ```
 
-Required options:
+An MCP SDK `Transport` for an `McpServer` or `Server`. `AmqpServerTransport` is the same class.
 
-- amqpUrl: string
-- exchangeName: string
-- queuePrefix: string
+- **The constructor throws** if `amqpUrl`, `exchangeName` or `queuePrefix` is missing, or if
+  `validateAmqpConfig` reports an error.
+- **`start()`** connects and consumes from `${queuePrefix}.requests.<sessionId>`, an exclusive,
+  auto-deleting, non-durable queue bound to `mcp.request.#` and `mcp.client-notification.#`.
+  `server.connect()` calls it. It is idempotent and rejects if the broker is unreachable.
+- **`send(message, options)`** answers a request on the requesting client's reply queue, or
+  publishes a notification under `mcp.server-notification.<method>`. It throws for a request
+  (§5 of the contract), for a response with no stored routing entry, and while disconnected.
+- **`close()`** stops reconnecting, clears the routing store, closes the channel and connection,
+  and fires `onclose` and `ontransportclosed` once.
+- **`getStatus()`** returns an `AmqpTransportStatus`: `connected`, `exchange`, `queuePrefix` and
+  the last error.
+- **`sessionId`** is the endpoint-instance id that names the queue. It is not an MCP session.
+- **`ontransportclosed(error?)`** fires once when the transport closes for good: on `close()`, or
+  when reconnecting has run out of attempts. `AmqpServerRuntime` uses it.
 
-### Lifecycle
-
-- start(): Promise<void> — Idempotent. Declares the exclusive endpoint queue and its bindings. The MCP SDK will call this when you server.connect(transport).
-- close(): Promise<void> — Closes channels and connection.
-- setProtocolVersion(version: string): void — MCP SDK compatibility.
-
-### Message flow
-
-- Incoming requests and client notifications are consumed from one exclusive queue bound to `${exchangeName}.mcp.routing` with exactly `mcp.request.#` and `mcp.client-notification.#`.
-- Each request id is rewritten to a unique internal id before the SDK sees it; routing info (correlationId, replyTo, originalId, timestamp) is stored under that internal id and the client's original id is restored on the response. Stale entries are cleaned up based on TTL.
-- A broker consumer cancel is treated as a connection failure (reported via onerror, then reconnect).
-- Outbound requests are rejected (no server-initiated requests).
-- Responses are sent directly to the client replyTo queue with the original correlationId using sendToQueue, with `contentType: 'application/json'`.
-- Notifications are published to `${exchangeName}.mcp.routing` with routing key `mcp.server-notification.{method}`.
+Before the SDK sees a request, the transport replaces its id with a unique internal id, and it
+restores the client's id on the response. A routing entry that no response consumes is dropped
+after `messageTTL`.
 
 ## AmqpServerRuntime
 
-Owns one `AMQPServerTransport` plus the server bound to it and keeps the pair alive across broker outages. Alias: `NativeAmqpRuntimeAdapter` (Open Discovery's name).
-
 ```ts
-const runtime = new AmqpServerRuntime();
-const result = await runtime.start(
-  { create: async () => buildServer(), release: (server) => {} },
-  { enabled: true, url: "amqp://localhost:5672", exchange: "mcp.notifications", queuePrefix: "mcp.myapp" },
-);
-// result.started === false means the broker was down; recovery continues in the background.
-runtime.getStatus(); // { connected, recovery: { state: 'idle' | 'waiting' | 'attempting' | 'stopped' | 'disabled', ... } }
-await runtime.send({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
-await runtime.stop();
+new AmqpServerRuntime<TServer extends ConnectableServer>(options?: { logger?: TransportLogger })
 ```
 
-After the transport closes for good, the runtime asks the factory for a **new** server and attaches it to a new transport (the SDK refuses to rebind a server). Recovery uses `recoveryRetryInterval`, `recoveryBackoffMultiplier`, `recoveryMaxRetryInterval` and `recoveryMaxRetries` (-1 = unlimited); set `autoRecoveryEnabled: false` to disable it.
+Owns one `AMQPServerTransport` and the server bound to it, and rebuilds both after the transport
+closes for good. `NativeAmqpRuntimeAdapter` is the same class.
 
-### Callbacks
+| Method | Returns | Does |
+| --- | --- | --- |
+| `start(factory, config)` | `Promise<AmqpRuntimeStartResult>` | Attaches a transport and a server from `factory.create()`. Never throws: a broker failure, an invalid config or a throwing `create()` returns `{ started: false, error }` and schedules recovery, which retries even an invalid config. Returns `{ started: false }` without connecting when `config.enabled` is `false`. |
+| `stop()` | `Promise<void>` | Cancels recovery, closes the transport and releases the server. |
+| `getStatus()` | `AmqpTransportStatus` | The attached transport's status, or `{ enabled, connected: false }` while none is attached, plus `recovery`: `state` (`disabled`, `idle`, `waiting`, `attempting`, `stopped`), `retryCount`, `nextRetryAt`, `lastAttemptAt`, `lastError`. |
+| `send(notification, options?)` | `Promise<void>` | Publishes a server notification through the current transport. Throws when there is none. |
 
-- onmessage?: (message: JSONRPCMessage, extra?: MessageExtraInfo) => void — The SDK will call transport.send() with the response.
-- onerror?: (error: Error) => void
-- onclose?: () => void
+**`AmqpServerFactory<TServer>`** has `create(): Promise<TServer>`, called on every attach, and an
+optional `release(server)`, called when that server's transport has gone. Return a new server
+from every `create()`.
+
+**`AmqpRuntimeConfig`** uses Open Discovery's field names:
+
+| Field | Default | Maps to |
+| --- | --- | --- |
+| `enabled` | required | `false` makes `start()` a no-op |
+| `url`, `exchange`, `queuePrefix` | required | `amqpUrl`, `exchangeName`, `queuePrefix` |
+| `prefetch` | none | `prefetchCount` |
+| `reconnectDelay`, `maxReconnectAttempts`, `messageTTL`, `queueTTL`, `maxMessageSize`, `routingKeyStrategy` | as the server transport | the transport option of the same name |
+| `autoRecoveryEnabled` | `true` | `false` disables runtime recovery |
+| `recoveryRetryInterval` | 30 000 ms | first delay after the transport closes |
+| `recoveryBackoffMultiplier` | 1.5 | growth per failed attempt |
+| `recoveryMaxRetryInterval` | 300 000 ms | cap on the delay |
+| `recoveryMaxRetries` | -1 | -1 retries forever |
+| `mode` | none | optional, and only `'amqp'`: accepted for Open Discovery compatibility |
 
 ## Options
 
-```ts
-export interface AMQPTransportOptions {
-  amqpUrl: string;
-  exchangeName: string;
-  reconnectDelay?: number; // ms, default 5000
-  maxReconnectAttempts?: number; // default 10
-  prefetchCount?: number; // default 1 (server), 10 (client)
-  messageTTL?: number; // ms
-  queueTTL?: number; // ms
-  routingKeyStrategy?: (message: JSONRPCMessage, routingType: 'request' | 'client-notification' | 'server-notification') => string;
-  logger?: TransportLogger; // default: warnings/errors to stderr
-  maxMessageSize?: number; // bytes, default 1048576 (1 MB)
-}
-
-export interface AMQPServerTransportOptions extends AMQPTransportOptions {
-  queuePrefix: string; // e.g. "mcp.discovery"
-}
-
-export interface AMQPClientTransportOptions extends AMQPTransportOptions {
-  serverQueuePrefix: string; // e.g. "mcp.discovery"
-  responseTimeout?: number; // ms, default 30000
-}
-```
-
-### JSONRPCMessage
-
-Standard JSON-RPC 2.0 message format.
-
-```typescript
-interface JSONRPCMessage {
-  jsonrpc: "2.0";
-  id?: string | number | null;
-  method?: string;
-  params?: any;
-  result?: any;
-  error?: {
-    code: number;
-    message: string;
-    data?: any;
-  };
-}
-```
-
-### RoutingInfo
-
-Information about message routing stored per request for response correlation.
-
-```typescript
-interface RoutingInfo {
-  correlationId: string;
-  replyTo: string;
-  timestamp: number; // Used for TTL-based cleanup
-}
-```
-
-**Note:** This is an internal type used by the server transport for managing response routing. The `timestamp` field enables automatic cleanup of stale routing entries.
-
-### TransportMetrics
-
-Performance and monitoring metrics.
-
-```typescript
-interface TransportMetrics {
-  messagesSent: number;
-  messagesReceived: number;
-  errorsEncountered: number;
-  averageResponseTime: number;
-  connectionUptime: number;
-}
-```
-
-## Utility Functions
-
-### parseMessage
-
-Safely parses incoming AMQP messages. Returns the parsed JSON-RPC message or throws a descriptive error.
-
-```typescript
-function parseMessage(content: Buffer | string): JSONRPCMessage;
-```
-
-**Parameters:**
-
-- `content`: Raw message content (Buffer or string)
-
-**Returns:**
-
-- Parsed `JSONRPCMessage` object
-
-**Throws:**
-
-- Error with detailed message if parsing or validation fails
-
-**Example:**
-
-```typescript
-import { parseMessage } from "amqp-mcp-transport";
-
-try {
-  const message = parseMessage(buffer);
-  console.log("Parsed message:", message);
-} catch (error) {
-  console.error("Failed to parse:", error.message);
-}
-```
-
-### validateJSONRPC
-
-Validates that an object conforms to JSON-RPC 2.0 specification.
-
-```typescript
-function validateJSONRPC(obj: unknown): JSONRPCMessage;
-```
-
-**Returns:** The validated `JSONRPCMessage`
-
-**Throws:** Error if the message is invalid
-
-**Example:**
-
-```typescript
-import { validateJSONRPC } from "amqp-mcp-transport";
-
-try {
-  const message = validateJSONRPC(JSON.parse(buffer.toString()));
-  // Message is valid JSON-RPC 2.0
-} catch (error) {
-  console.error("Invalid JSON-RPC message:", error.message);
-}
-```
-
-### getRoutingKey
-
-Derives an AMQP routing key from a JSON-RPC method name and message type.
-
-```typescript
-function getRoutingKey(
-  method: string,
-  messageType: 'request' | 'notification',
-  strategy?: RoutingKeyStrategy
-): string;
-```
-
-**Parameters:**
-
-- `method`: JSON-RPC method name (e.g., "tools/list")
-- `messageType`: Type of message ('request' or 'notification')
-- `strategy`: Optional custom routing strategy (uses default if not provided)
-
-**Returns:** Routing key string (e.g., "mcp.request.tools.list")
-
-**Example:**
-
-```typescript
-import { getRoutingKey } from "amqp-mcp-transport";
-
-// Default strategy
-const key1 = getRoutingKey("tools/list", "request");
-console.log(key1); // "mcp.request.tools.list"
-
-// Custom strategy for category-based routing
-const customStrategy = (method: string, type: string) => {
-  const category = method.startsWith("nmap_") ? "nmap" : "general";
-  return `mcp.${type}.${category}.${method.replace(/\//g, ".")}`;
-};
-const key2 = getRoutingKey("nmap_scan", "request", customStrategy);
-console.log(key2); // "mcp.request.nmap.nmap_scan"
-```
-
-### validateAmqpConfig
-
-Validates required AMQP configuration values.
-
-```typescript
-function validateAmqpConfig(config: {
-  amqpUrl: string;
-  queuePrefix: string;
-  exchangeName: string;
-  reconnectDelay?: number;
-  maxReconnectAttempts?: number;
-  prefetchCount?: number;
-}): string[];
-```
-
-**Returns:** Array of validation error messages (empty when valid).
-
-**Example:**
-
-```typescript
-import { validateAmqpConfig } from "amqp-mcp-transport";
-
-const errors = validateAmqpConfig({
-  amqpUrl: "amqp://localhost:5672",
-  queuePrefix: "mcp.server",
-  exchangeName: "mcp.notifications",
-});
-
-if (errors.length) console.error("Config errors:", errors);
-```
-
-### generateCorrelationId
-
-Generates a unique correlation ID for request/response matching.
-
-```typescript
-function generateCorrelationId(sessionId: string): string;
-```
-
-**Parameters:**
-
-- `sessionId`: Session identifier to include in correlation ID
-
-**Returns:** Unique correlation ID string
-
-**Example:**
-
-```typescript
-import { generateCorrelationId } from "amqp-mcp-transport";
-import { randomUUID } from "crypto";
-
-const sessionId = randomUUID();
-const correlationId = generateCorrelationId(sessionId);
-console.log(correlationId); // "{sessionId}-{random}"
-```
-
-### getDefaultConfig
-
-Returns default AMQP configuration values from environment variables.
-
-```typescript
-function getDefaultConfig(): {
-  AMQP_URL: string;
-  AMQP_QUEUE_PREFIX: string;
-  AMQP_EXCHANGE: string;
-  AMQP_RESPONSE_TIMEOUT: number;
-  AMQP_PREFETCH: number;
-};
-```
-
-**Returns:** Configuration object with defaults from environment or hardcoded fallbacks
-
-**Example:**
-
-```typescript
-import { getDefaultConfig } from "amqp-mcp-transport";
-
-const defaults = getDefaultConfig();
-console.log(defaults.AMQP_URL); // "amqp://guest:guest@localhost:5672"
-```
-
-**Example:**
-
-```typescript
-import { AMQPClientTransport, testAmqpConnection } from "amqp-mcp-transport";
-
-const transport = new AMQPClientTransport({
-  amqpUrl: "amqp://localhost:5672",
-  serverQueuePrefix: "mcp.server",
-  exchangeName: "mcp.notifications",
-});
-
-const health = await testAmqpConnection(transport);
-console.log(health);
-```
-
-### detectMessageType
-
-Analyzes a JSON-RPC message to determine its role.
-
-```typescript
-function detectMessageType(
-  message: JSONRPCMessage
-): "request" | "response" | "notification";
-```
-
-**Example:**
-
-```typescript
-import { detectMessageType } from "amqp-mcp-transport";
-
-const type = detectMessageType({
-  jsonrpc: "2.0",
-  id: 1,
-  method: "tools/list",
-  params: {},
-});
-console.log("Message type:", type); // 'request'
-```
-
-## Error Types
-
-### AMQPTransportError
-
-Base error class for transport-related errors.
-
-```typescript
-class AMQPTransportError extends Error {
-  code: string;
-  cause?: Error;
-}
-```
-
-### ConnectionError
-
-Error thrown when connection to AMQP broker fails.
-
-```typescript
-class ConnectionError extends AMQPTransportError {
-  code: "CONNECTION_FAILED" | "CONNECTION_LOST" | "AUTHENTICATION_FAILED";
-}
-```
-
-### TimeoutError
-
-Error thrown when requests exceed the configured timeout.
-
-```typescript
-class TimeoutError extends AMQPTransportError {
-  code: "REQUEST_TIMEOUT";
-  timeout: number;
-}
-```
-
-### ValidationError
-
-Error thrown when configuration or message validation fails.
-
-```typescript
-class ValidationError extends AMQPTransportError {
-  code: "INVALID_CONFIG" | "INVALID_MESSAGE";
-  details: string[];
-}
-```
-
-<!-- Events section removed: transports expose callbacks (onmessage, onerror, onclose) rather than an EventEmitter API. Refer to the Callbacks section for each transport. -->
+`AMQPTransportOptions` are shared. `AMQPClientTransportOptions` and `AMQPServerTransportOptions`
+extend them.
+
+| Option | Client default | Server default | Meaning |
+| --- | --- | --- | --- |
+| `amqpUrl` | required | required | `amqp://` or `amqps://` URL, passed to `amqplib.connect()` unchanged |
+| `exchangeName` | required | required | Prefix of the topic exchange `${exchangeName}.mcp.routing` |
+| `serverQueuePrefix` | required | | Required, not used for routing in 1.x |
+| `queuePrefix` | | required | Prefix of the server's queue name |
+| `reconnectDelay` | 5 000 ms | 5 000 ms | Delay between reconnect attempts. The server requires at least 1 000. |
+| `maxReconnectAttempts` | 10 | 10 | Attempts before the transport closes for good. The server requires at least 1. |
+| `prefetchCount` | 10 | none (unlimited) | Unacknowledged deliveries per consumer |
+| `messageTTL` | 60 000 ms | 3 600 000 ms | `x-message-ttl` on the transport's queues. The server also drops unanswered routing entries after it. |
+| `queueTTL` | 300 000 ms | 7 200 000 ms | `x-expires` on the transport's queues |
+| `maxMessageSize` | 1 048 576 bytes | 1 048 576 bytes | Larger inbound messages are dropped and reported through `onerror` |
+| `responseTimeout` | 30 000 ms | | Stops tracking an unanswered request and reports it through `onerror`. The SDK call fails on its own timeout. |
+| `routingKeyStrategy` | default | default | `(message, routingType) => string`. Must keep each key inside its namespace. |
+| `logger` | stderr | stderr | `TransportLogger`: `debug`, `info`, `warn`, `error`. The default prints warnings and errors. |
+
+## Utilities
+
+The routing helpers are what the transports themselves use.
+
+| Export | Signature | Does |
+| --- | --- | --- |
+| `routingExchangeName` | `(exchangeName) => string` | `${exchangeName}.mcp.routing` |
+| `ROUTING_PATTERNS` | `{ request, clientNotification, serverNotification }` | The three binding patterns |
+| `defaultRoutingKeyStrategy` | `(message, routingType) => string` | `mcp.<routingType>.<method>`, with `/` as `.` |
+| `getRoutingKey` | `(message, routingType, strategy?) => string` | Applies `strategy`, or the default |
+| `normalizeMethodForRouting` | `(method) => string` | Replaces `/` with `.` |
+| `parseMessage` | `(content: Buffer \| string) => ParseResult` | Parses and validates; never throws |
+| `validateJSONRPC` | `(obj: unknown) => JSONRPCMessage` | Throws unless `obj` has `jsonrpc: "2.0"` and either a string `method` or a `result` or `error`. It does not check `id`. |
+| `detectMessageType` | `(message) => 'request' \| 'response' \| 'notification'` | Classifies a message |
+| `isJSONRPCRequest`, `isJSONRPCNotification` | type guards | |
+| `sanitizeJsonRpcMessage` | `(message) => JSONRPCMessage` | Copies a message, sets `jsonrpc: "2.0"` if missing and removes `_rabbitMQ*` keys |
+| `validateAmqpConfig` | `(config) => string[]` | The server constructor's checks; empty when valid |
+| `generateSessionId`, `generateCorrelationId` | `() => string`, `(sessionId) => string` | The ids the transports use |
+| `createDefaultLogger` | `(scope) => TransportLogger` | The default stderr logger |
+| `getDefaultConfig` | `() => DefaultAMQPConfig` | Reads `AMQP_URL`, `AMQP_QUEUE_PREFIX`, `AMQP_EXCHANGE` and other `AMQP_*` variables. Its keys are those variable names, not option names, and its defaults (exchange `mcp.notifications`, prefetch 1) are not the transports'. |
+| `createLogEntry` | `(transport, sessionId, operation, data?) => LogEntry` | A timestamped log record |
+
+**Kept for Open Discovery compatibility.** Prefer `getStatus()`.
+
+- `testAmqpConnection(transport)` opens a channel on `transport.connection`, declares a
+  `mcp.heartbeat` fanout exchange on the broker and publishes to it. TypeScript rejects passing
+  either transport class, whose `connection` is private; from JavaScript it runs.
+- `getAmqpStatus` reports `connected: true` for any non-null argument. It does not check a
+  connection.
+
+## Types
+
+Besides the option and config types above, the package exports these for TypeScript:
+
+| Type | What it is |
+| --- | --- |
+| `AmqpTransportStatus`, `AmqpRecoveryStatus`, `AmqpRecoveryState` | What `getStatus()` returns |
+| `AmqpRuntimeConfig`, `AmqpRuntimeStartResult`, `AmqpServerFactory`, `AmqpServerRuntimeOptions` | `AmqpServerRuntime`'s inputs and result |
+| `ConnectableServer` | Anything with `connect(transport)`: `McpServer` and `Server` |
+| `RuntimeManagedTransport` | The part of a server transport the runtime uses |
+| `AMQPConnection`, `ConnectionState` | The connection shape the transports need, and their connection state |
+| `RoutingKeyStrategy`, `RoutingMessageType`, `TransportLogger` | The strategy, its namespaces, and the logger |
+| `ParseResult`, `DefaultAMQPConfig`, `LogEntry`, `HealthCheckResult`, `AMQPStatus`, `AutoRecoveryConfig` | The utilities' results and inputs |
+| `JSONRPCMessage`, `JSONRPCNotification`, `RequestId`, `MessageExtraInfo`, `Transport`, `TransportSendOptions` | Re-exported from the SDK |
+
+## binding-core
+
+`@vibeforge-systems/amqp-mcp-transport/binding` is the wire rules of the draft
+[BINDING.md](./BINDING.md) as pure functions: no `amqplib`, no SDK, no I/O. A profile translates
+its client library's message into an `InboundEnvelope`, asks binding-core what to do with it, and
+performs the I/O itself. 1.x does not use it. The 2.0.0 serving engine will.
+
+| Area | Main exports | BINDING |
+| --- | --- | --- |
+| Names and topology | `assertBindingNames`, `routingKeyFor`, `topologyNames`, `serverTopology`, `exchangeNames`, `eraOfExchange` | §2, §4 |
+| Mirrors | `checkMirrors`, `expectedNameMirror`, the `HEADER_*` names | §5.2, §8 |
+| Deadlines | `parseExpiration`, `requestDeadline`, `listenLifetimeMs` | §6.3, §7.1 |
+| Inbound classification | `classifyInbound` | §6.1, §7.1, §7.4, §8 |
+| Cancellation | `ExchangeRegistry` | §6.1, §6.4 |
+| Outbound envelopes | `buildClientRequest`, `buildClientNotification`, `buildServerMessage`, `buildDeadLetter` | §4.2, §5.2, §7.4 |
+| Principal | `authInfoFor` | §9.1, §9.2 |
+| Redelivery | `redeliveryAction` | §7.2 |
+| Errors | `errorResponse`, `HEADER_MISMATCH`, the dead-letter reasons | §7.4, §8 |
+
+Each export's TSDoc states its rule. The binding is a draft, so these may change before 2.0.0.
