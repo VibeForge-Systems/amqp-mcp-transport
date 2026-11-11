@@ -1,9 +1,10 @@
 # AMQP MCP Transport
 
-**Model Context Protocol over a message broker: client and server transports for AMQP 0-9.1 (RabbitMQ) that plug into the MCP TypeScript SDK, and the binding that takes them to MCP 2026-07-28.**
+**Model Context Protocol over a message broker: client and server transports for AMQP 0-9.1 (RabbitMQ) that plug into the MCP TypeScript SDK, and a proposed binding that takes them to MCP 2026-07-28.**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](package.json)
+[![CI](https://github.com/VibeForge-Systems/amqp-mcp-transport/actions/workflows/ci.yml/badge.svg)](https://github.com/VibeForge-Systems/amqp-mcp-transport/actions/workflows/ci.yml)
+[![Node](https://img.shields.io/badge/node-%3E%3D22-339933.svg)](package.json)
 [![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](CHANGELOG.md)
 [![MCP SDK](https://img.shields.io/badge/%40modelcontextprotocol%2Fsdk-%3E%3D1.17.1_%3C2-6f42c1.svg)](package.json)
 
@@ -14,8 +15,8 @@ instead of over a direct HTTP or stdio connection. Hand `AMQPServerTransport` to
 
 > **1.3.0 serves the 2025-era protocol** through `@modelcontextprotocol/sdk` v1.
 > [MCP Open Discovery](https://github.com/VibeForge-Systems/mcp-open-discovery) uses it
-> as its AMQP transport. **2.0.0 implements MCP 2026-07-28 and targets Q4 2026.** Its wire format
-> is specified in [docs/BINDING.md](docs/BINDING.md). Its first piece, binding-core, ships in
+> as its AMQP transport. **2.0.0, in development, will implement MCP 2026-07-28.** Its wire format
+> is specified in [docs/BINDING.md](docs/BINDING.md), a VibeForge Systems proposal. Its first piece, binding-core, ships in
 > 1.3.0 as `@vibeforge-systems/amqp-mcp-transport/binding`.
 
 ---
@@ -29,8 +30,8 @@ instead of over a direct HTTP or stdio connection. Hand `AMQPServerTransport` to
   server after an outage.
 - **It runs on messaging you already operate.** Authentication, TLS (`amqps://`), virtual hosts,
   per-user permissions and monitoring are the broker's, not one more HTTP endpoint per server.
-- **A path to pools.** 2.0.0 serves a logical server from competing consumers on one shared queue,
-  so any instance can answer any request. 1.x serves one server per exchange.
+- **A path to pools.** 2.0.0 will serve a logical server from competing consumers on one shared
+  queue, so any instance can answer any request. 1.x serves one server per exchange.
 
 The cost is a broker to run and an extra network hop. 1.x also has limits that HTTP does not: see
 [What 1.x does not do](#what-1x-does-not-do).
@@ -39,7 +40,7 @@ The cost is a broker to run and an extra network hop. 1.x also has limits that H
 
 ## Quick start
 
-You need Node 18 or later and Docker.
+You need Node 22 or later and Docker.
 
 ```bash
 git clone https://github.com/VibeForge-Systems/amqp-mcp-transport
@@ -63,7 +64,14 @@ resource, all through the broker. The RabbitMQ management UI is at <http://local
 npm install @vibeforge-systems/amqp-mcp-transport @modelcontextprotocol/sdk
 ```
 
-- **1.3.0 is the first release on npm.** To track unreleased work, install `main` from GitHub:
+> **npm publication of 1.3.0 is pending.** Until it lands, install the release tarball, which npm
+> records with an integrity hash:
+>
+> ```bash
+> npm install https://github.com/VibeForge-Systems/amqp-mcp-transport/releases/download/v1.3.0/vibeforge-systems-amqp-mcp-transport-1.3.0.tgz @modelcontextprotocol/sdk
+> ```
+
+- **1.3.0 is the first release under the scoped name.** To track unreleased work, install `main` from GitHub:
   `npm install github:VibeForge-Systems/amqp-mcp-transport`. The `prepare` script builds it on
   install.
 - **v1.2.0 and earlier are named `amqp-mcp-transport`.** None of them was published to npm. The
@@ -240,7 +248,9 @@ broadcasts. The 2025-era model of one long-lived `Transport` per connection does
 is a re-architecture, not a patch.
 
 - **[docs/BINDING.md](docs/BINDING.md) is the binding specification.** It is a draft, and its
-  design was ratified on 2026-10-28. It defines:
+  design was approved by the project maintainers on 2026-10-28. It is a VibeForge Systems
+  proposal: it is not part of the MCP specification, and it has not been reviewed or endorsed by
+  the MCP maintainers or by OASIS. It defines:
   - the AMQP 0-9.1 topology for a pool of server instances;
   - the message mapping, and how envelope fields that mirror the body are checked;
   - exact cancellation across a pool;
@@ -297,10 +307,11 @@ npm run typecheck
 npm run build        # dist/
 ```
 
-- **CI.** `.github/workflows/ci.yml` runs lint, the typecheck, the build, the tests on Node 18, 20
-  and 22, and the examples build.
+- **CI.** `.github/workflows/ci.yml` runs lint, the typecheck, the build, the tests on Node 22 and
+  24, and the examples build.
 - **Releases.** A `vX.Y.Z` tag builds, tests and packs the package, then publishes a GitHub Release
-  with the tarball and its SHA-256 attached. Publishing to npm is a separate, manual workflow.
+  with the tarball and its SHA-256 attached. Publishing to npm is a separate, manual workflow, with
+  npm provenance.
 
 ```text
 src/transports/   the 1.x client and server transports, AmqpServerRuntime and utilities

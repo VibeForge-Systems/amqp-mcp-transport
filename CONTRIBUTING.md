@@ -12,7 +12,7 @@ cd amqp-mcp-transport
 npm install          # also builds dist/, via the prepare script
 ```
 
-Node 18 or later. The tests need no broker: they inject a fake connection. To run the examples
+Node 22 or later. The tests need no broker: they inject a fake connection. To run the examples
 against a real broker, start one with `docker compose up -d`, as the
 [README](README.md#quick-start) shows.
 
@@ -28,7 +28,7 @@ npm run build
 npm run build:examples
 ```
 
-CI runs the same checks, the tests on Node 18, 20 and 22.
+CI runs the same checks, the tests on Node 22 and 24.
 
 ## What a change needs
 

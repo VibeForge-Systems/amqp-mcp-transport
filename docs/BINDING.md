@@ -1,6 +1,8 @@
 # MCP over AMQP: binding specification
 
-- **Status:** Draft, design ratified. It becomes normative for this package when two things are
+- **Status:** Draft, design approved by the project maintainers. This is a VibeForge Systems
+  proposal: it is not part of the MCP specification, and it has not been reviewed or endorsed by
+  the MCP maintainers or by OASIS. It becomes normative for this package when two things are
   true:
   - the maintainer ratifies decision D-1 of
     [REARCHITECTURE_PLAN_2026-07-28.md](./history/REARCHITECTURE_PLAN_2026-07-28.md). **Done 2026-10-28**,

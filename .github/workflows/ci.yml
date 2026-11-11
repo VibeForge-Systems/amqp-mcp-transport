@@ -2,56 +2,43 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
-  pull_request:
     branches: [main]
+  pull_request:
 
+# Read-only token for every job: nothing here writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Actions are pinned to full commit SHAs, because a tag can be moved after review. The comment
+# names the release each SHA was taken from; Dependabot bumps them together.
+# The tests inject a fake AMQP connection, so no broker service is needed.
 jobs:
   test:
     runs-on: ubuntu-latest
-
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [18.x, 20.x, 22.x]
-
-    services:
-      rabbitmq:
-        image: rabbitmq:3-management
-        ports:
-          - 5672:5672
-          - 15672:15672
-        env:
-          RABBITMQ_DEFAULT_USER: test
-          RABBITMQ_DEFAULT_PASS: test
-        options: >-
-          --health-cmd "rabbitmqctl node_health_check"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+        node-version: [22.x, 24.x]
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node-version }}
-          cache: "npm"
+          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run linter
-        run: npm run lint
-
-      - name: Build project
-        run: npm run build
-
-      - name: Run tests
-        run: npm test
-        env:
-          AMQP_URL: amqp://test:test@localhost:5672
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
 
       - name: Check build artifacts
         run: |
@@ -62,46 +49,20 @@ jobs:
   build-examples:
     runs-on: ubuntu-latest
     needs: test
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Use Node.js 20.x
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          node-version: 20.x
-          cache: "npm"
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: npm ci
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.x
+          cache: npm
 
-      - name: Build examples
-        run: npm run build:examples
+      - run: npm ci
+      - run: npm run build:examples
 
       - name: Verify examples build
         run: |
           test -f dist-examples/examples/client.js
           test -f dist-examples/examples/server.js
-
-  type-check:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Use Node.js 20.x
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.x
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run TypeScript type check
-        run: npx tsc --noEmit
-
-      - name: Check for type errors
-        run: npx tsc --noEmit --strict

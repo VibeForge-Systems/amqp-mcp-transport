@@ -7,7 +7,7 @@ the 2025-era protocol through `@modelcontextprotocol/sdk` v1. Every option and d
 
 ## Prerequisites
 
-- Node 18 or later.
+- Node 22 or later.
 - `@modelcontextprotocol/sdk` 1.17.1 or later, below 2. It is a peer dependency, so your
   application installs it.
 - RabbitMQ. The examples run against 3.12 and 4.4. Other AMQP 0-9.1 brokers are untested.
@@ -21,7 +21,13 @@ The snippets use top-level `await`, so run them as ES modules.
 npm install @vibeforge-systems/amqp-mcp-transport @modelcontextprotocol/sdk
 ```
 
-1.3.0 is the first release on npm. To track unreleased work, install `main` from GitHub instead:
+npm publication of 1.3.0 is pending. Until it lands, install the release tarball:
+
+```bash
+npm install https://github.com/VibeForge-Systems/amqp-mcp-transport/releases/download/v1.3.0/vibeforge-systems-amqp-mcp-transport-1.3.0.tgz @modelcontextprotocol/sdk
+```
+
+To track unreleased work, install `main` from GitHub instead:
 
 ```bash
 npm install github:VibeForge-Systems/amqp-mcp-transport

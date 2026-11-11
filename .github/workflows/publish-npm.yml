@@ -8,9 +8,15 @@ name: Publish to npm
 on:
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # id-token: write lets npm sign a provenance statement tying the package to this run.
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Must run against a version tag
@@ -21,14 +27,24 @@ jobs:
           esac
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Use Node.js 22.x
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22.x
-          cache: "npm"
+          # No `cache:` on the publish path: a poisoned dependency cache would ship to npm.
           registry-url: "https://registry.npmjs.org"
+
+      - name: Tag must match package.json version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
+            exit 1
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -37,6 +53,6 @@ jobs:
         run: npm test
 
       - name: Publish
-        run: npm publish
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

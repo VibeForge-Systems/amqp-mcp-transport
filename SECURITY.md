@@ -9,7 +9,8 @@ Security fixes land on `main` and ship in the next 1.x release. Earlier releases
 | 1.3.x | :white_check_mark: |
 | 1.2.x and earlier | :x: |
 
-1.1.0 and earlier have a cross-client response leak, fixed in 1.1.1. The
+1.1.0 and earlier have a cross-client response leak. The fix is versioned 1.1.1 in the CHANGELOG
+and was first tagged in v1.2.0. The
 [CHANGELOG](CHANGELOG.md) describes it. Upgrade from them.
 
 ## Reporting a vulnerability

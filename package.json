@@ -1,7 +1,7 @@
 {
   "name": "@vibeforge-systems/amqp-mcp-transport",
   "version": "1.3.0",
-  "description": "MCP client and server transports over AMQP 0-9.1 (RabbitMQ), and binding-core for the MCP 2026-07-28 AMQP binding",
+  "description": "MCP client and server transports over AMQP 0-9.1 (RabbitMQ), and binding-core for a proposed MCP-over-AMQP binding targeting MCP 2026-07-28",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -39,7 +39,7 @@
     "typescript",
     "message-queue"
   ],
-  "author": "VibeForge Systems",
+  "author": "VibeForge Systems, Inc. (https://www.vibeforgesystems.com/)",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -50,11 +50,11 @@
     "url": "https://github.com/VibeForge-Systems/amqp-mcp-transport/issues"
   },
   "dependencies": {
+    "@types/amqplib": "^0.10.5",
     "amqplib": "^0.10.4"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.17.1",
-    "@types/amqplib": "^0.10.5",
     "@types/jest": "^29.5.12",
     "@types/node": "^20.11.24",
     "@typescript-eslint/eslint-plugin": "^7.1.1",
@@ -66,7 +66,7 @@
     "zod": "^3.22.4"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22"
   },
   "files": [
     "dist/**/*",
