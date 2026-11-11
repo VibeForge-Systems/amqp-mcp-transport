@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Two notes on the history below. Versions 1.1.0 and 1.1.1 were never tagged: their changes first
+shipped in the v1.2.0 release. And releases before 1.3.0 made breaking changes in minor versions;
+from 1.3.0 on, breaking changes wait for a major version.
+
 ## [Unreleased]
+
+### Changed
+- Node.js 22 or later is required (`engines.node`). Node 18 and 20 are past end-of-life; CI tests 22 and 24.
+- `@types/amqplib` is a runtime dependency, because the published declarations import types from `amqplib`. Consumers that type-check libraries (`skipLibCheck: false`) no longer fail with TS7016.
+- The binding is described as a VibeForge Systems proposal, not part of the MCP specification.
 
 ## [1.3.0] - 2026-11-07
 
@@ -235,12 +244,3 @@ First public release (curated history) — highlights:
 - Clean separation of transport vs. application concerns
 - Deprecated legacy files with preservation for reference
 
-## [Unreleased]
-
-### Planned
-
-- Additional transport configuration options
-- Enhanced monitoring and metrics collection
-- Connection pooling support
-- Advanced routing strategies
-- Performance optimizations
