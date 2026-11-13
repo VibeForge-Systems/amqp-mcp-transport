@@ -54,12 +54,12 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "@types/jest": "^29.5.12",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22",
     "@typescript-eslint/eslint-plugin": "^8.72.2",
     "@typescript-eslint/parser": "^8.72.2",
     "eslint": "^8.57.0",
-    "jest": "^29.7.0",
+    "jest": "^30.5.2",
     "ts-jest": "^29.4.15",
     "typescript": "^5.5.4",
     "zod": "^4.6.7"
