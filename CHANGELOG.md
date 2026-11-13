@@ -15,6 +15,7 @@ from 1.3.0 on, breaking changes wait for a major version.
 - Node.js 22 or later is required (`engines.node`). Node 18 and 20 are past end-of-life; CI tests 22 and 24.
 - `@types/amqplib` is a runtime dependency, because the published declarations import types from `amqplib`. Consumers that type-check libraries (`skipLibCheck: false`) no longer fail with TS7016.
 - The binding is described as a VibeForge Systems proposal, not part of the MCP specification.
+- The development toolchain moves to typescript-eslint 8, `@modelcontextprotocol/sdk` 1.32.2 with zod 4 for the tests, and `@types/node` 22 to match `engines.node`. The published package is unchanged by this, and the SDK peer range stays `>=1.17.1 <2`.
 
 ## [1.3.0] - 2026-11-07
 
