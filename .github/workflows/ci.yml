@@ -46,6 +46,27 @@ jobs:
           test -f dist/index.d.ts
           test -d dist/transports
 
+  # The SDK peer range is >=1.17.1 <2, and the lock tests only the newest SDK. This job runs the
+  # type check and the tests at the floor: SDK 1.17.1, with the zod 3 that release requires.
+  peer-floor:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - run: npm ci
+      - run: npm install --no-save --no-audit --no-fund @modelcontextprotocol/sdk@1.17.1 zod@3.25.76
+      - run: npm ls @modelcontextprotocol/sdk zod || true
+      - run: npm run typecheck
+      - run: npm test
+
   build-examples:
     runs-on: ubuntu-latest
     needs: test

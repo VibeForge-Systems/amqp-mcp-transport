@@ -13,8 +13,12 @@ from 1.3.0 on, breaking changes wait for a major version.
 
 ### Changed
 - Node.js 22 or later is required (`engines.node`). Node 18 and 20 are past end-of-life; CI tests 22 and 24.
-- `@types/amqplib` is a runtime dependency, because the published declarations import types from `amqplib`. Consumers that type-check libraries (`skipLibCheck: false`) no longer fail with TS7016.
+- `amqplib` is now `^2.3.1`, up from `^0.10.4`. It carries the fix for GHSA-37f9-7m79-6866 (frame handling: a broker-sent `frameMax` below the protocol minimum could make `publish` loop until memory ran out, and incoming frame sizes went unchecked), which the 0.10.x line never received. The advisory is not public yet; amqplib's CHANGELOG for v2.3.0 describes the fix. amqplib 2 bundles its own type declarations, so `@types/amqplib` is no longer a dependency: the published declarations import types from `amqplib`, and those imports now resolve against amqplib itself. Type-checking these declarations (`skipLibCheck: false`) needs `@types/node`, as amqplib's own bundled declarations do.
+  - The exported `AMQPConnection` type's `createChannel()` now returns amqplib 2's `Channel`. Code that types a connection against `@types/amqplib` 0.10 needs amqplib 2's types or a cast. An application that also depends on amqplib 0.10 installs two copies of amqplib until it moves to 2.
+  - amqplib marks two changes as breaking since 0.10 (its CHANGELOG has the full list): Node.js 18 or later (this package already requires 22), and `heartbeat: 0`, which now turns heartbeats off instead of accepting the broker's suggested value. This library sets no `heartbeat` option; only a connection URL that itself carries `heartbeat=0` behaves differently.
+  - amqplib 2.3.0 also closes a connection that receives a frame larger than `maxFrameSize` (64 MiB by default, or the negotiated `frameMax` if that is larger). The limit can be set as a query parameter on the connection URL.
 - The binding is described as a VibeForge Systems proposal, not part of the MCP specification.
+- The development toolchain moves to typescript-eslint 8, `@modelcontextprotocol/sdk` 1.32.2 with zod 4 for the tests, and `@types/node` 22 to match `engines.node`. The published package is unchanged by this, and the SDK peer range stays `>=1.17.1 <2`. CI now tests both ends of that range: the locked SDK in the main job, and 1.17.1 with zod 3 in a `peer-floor` job.
 
 ## [1.3.0] - 2026-11-07
 

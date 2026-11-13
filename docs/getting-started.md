@@ -12,6 +12,8 @@ the 2025-era protocol through `@modelcontextprotocol/sdk` v1. Every option and d
   application installs it.
 - RabbitMQ. The examples run against 3.12 and 4.4. Other AMQP 0-9.1 brokers are untested.
 - `zod`, for the server example's input schema: `npm install zod`.
+- `@types/node`, if your project type-checks its dependencies' declarations
+  (`skipLibCheck: false`). amqplib's bundled declarations need it, and so do this package's.
 
 The snippets use top-level `await`, so run them as ES modules.
 
