@@ -18,7 +18,7 @@ from 1.3.0 on, breaking changes wait for a major version.
   - amqplib marks two changes as breaking since 0.10 (its CHANGELOG has the full list): Node.js 18 or later (this package already requires 22), and `heartbeat: 0`, which now turns heartbeats off instead of accepting the broker's suggested value. This library sets no `heartbeat` option; only a connection URL that itself carries `heartbeat=0` behaves differently.
   - amqplib 2.3.0 also closes a connection that receives a frame larger than `maxFrameSize` (64 MiB by default, or the negotiated `frameMax` if that is larger). The limit can be set as a query parameter on the connection URL.
 - The binding is described as a VibeForge Systems proposal, not part of the MCP specification.
-- The development toolchain moves to typescript-eslint 8, `@modelcontextprotocol/sdk` 1.32.2 with zod 4 for the tests, and `@types/node` 22 to match `engines.node`. The published package is unchanged by this, and the SDK peer range stays `>=1.17.1 <2`. CI now tests both ends of that range: the locked SDK in the main job, and 1.17.1 with zod 3 in a `peer-floor` job.
+- The development toolchain moves to typescript-eslint 8, `@modelcontextprotocol/sdk` 1.32.2 with zod 4 for the tests, and `@types/node` 22 to match `engines.node`. The published package is unchanged by this, and the SDK peer range stays `>=1.17.1 <2`. CI now tests both ends of that range: the locked SDK in the main job, and 1.17.1 with zod 3 in a `peer-floor` job. Linting moves to ESLint 10 with a flat config (`eslint.config.mjs`), which replaces `eslintrc.json` and `.eslintignore` with the same rules and ignores, and the tests run on Jest 30.
 
 ## [1.3.0] - 2026-11-07
 
