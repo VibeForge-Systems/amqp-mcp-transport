@@ -50,7 +50,7 @@
     "url": "https://github.com/VibeForge-Systems/amqp-mcp-transport/issues"
   },
   "dependencies": {
-    "amqplib": "^2.3.1"
+    "amqplib": "^2.4.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
